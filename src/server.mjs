@@ -489,12 +489,12 @@ const PANEL_HTML_SABLON = `<!doctype html><html lang="en"><head><meta charset="u
   </div>
 </div>
 <script>
-  window.__UISIGHT_TOKEN = '__TOKEN__';
+  const uisightToken = '__TOKEN__';
   const vp = {}; // oturum -> viewport
   let cihazListesi = [];
   let aktifOturum = 'mobil';
 
-  const ey = (g) => fetch('/eylem', { method:'POST', headers:{'content-type':'application/json','x-uisight-token':window.__UISIGHT_TOKEN}, body: JSON.stringify(g) }).then(r=>r.json());
+  const ey = (g) => fetch('/eylem', { method:'POST', headers:{'content-type':'application/json','x-uisight-token':uisightToken}, body: JSON.stringify(g) }).then(r=>r.json());
   const not = (m) => { document.getElementById('durumcu').textContent = m; setTimeout(()=>{document.getElementById('durumcu').textContent='';}, 4000); };
 
   function paneOlustur(o) {
