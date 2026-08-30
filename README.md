@@ -143,12 +143,14 @@ npm test          # runs the inspection engine against fixture pages in a real b
 
 The tests are regression locks: every case in `test/inspect.test.mjs` is something the engine got wrong at least once — a false "clean" verdict, a false alarm, or a measurement that silently skipped a color format.
 
+See [CONTRIBUTING.md](CONTRIBUTING.md) before touching the measurement engine — it explains why the color math cannot be extracted into a module, and what a good bug report looks like.
+
 ## Notes & limitations
 
 - iPhone profiles run on real WebKit (Safari's engine) — close to iOS, but not an iOS Simulator.
 - Browsers are downloaded once by Playwright on first run (`npx playwright install chromium webkit` if you want to pre-warm).
 - Everything runs **locally** — no cloud, no account, your screens never leave your machine.
-- v0.1 ships English surfaces over an internal codebase originally written in Turkish (being migrated). Contributions welcome; variable names may surprise you until v0.2.
+- As of v0.2 the codebase is English throughout — identifiers, comments, and the panel's HTTP field names. If you were calling the panel API directly, [CHANGELOG.md](CHANGELOG.md) has the rename table.
 
 ## License
 

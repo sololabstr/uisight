@@ -34,26 +34,26 @@ const TR = (process.env.UISIGHT_LANG || '').toLowerCase() === 'tr';
 const log = (...a) => console.error('[uisight-mcp]', ...a);
 
 // Public session names → server-internal ids.
-const SESSION_MAP = { desktop: 'web', mobile: 'mobil', web: 'web', mobil: 'mobil' };
-const sid = (s) => SESSION_MAP[s] || 'mobil';
+const SESSION_MAP = { desktop: 'web', mobile: 'mobile', web: 'web' };
+const sid = (s) => SESSION_MAP[s] || 'mobile';
 
 // --- HTTP helpers ---
 async function req(path, opts = {}, timeoutMs = 15000) {
-  const ac = new AbortController();
-  const t = setTimeout(() => ac.abort(), timeoutMs);
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
-    return await fetch(BASE + path, { ...opts, signal: ac.signal });
+    return await fetch(BASE + path, { ...opts, signal: ctrl.signal });
   } finally { clearTimeout(t); }
 }
-const getStatus = async (ms = 2000) => (await req('/durum', {}, ms)).json();
+const getStatus = async (ms = 2000) => (await req('/state', {}, ms)).json();
 
-// Panel, mutasyon uclari icin token ister (CSRF kesici). Token port basina yerel
-// dosyada; her cagride taze okunur (panel yeniden basladiginda token degisir).
+// The panel demands a token on mutating endpoints (CSRF guard). It lives in a per-port
+// local file and is re-read on every call (it changes when the panel restarts).
 const tokenOku = () => {
   try { return readFileSync(join(homedir(), '.uisight', 'live', `token-${PORT}`), 'utf8').trim(); } catch { return ''; }
 };
 async function action(body) {
-  const r = await req('/eylem', {
+  const r = await req('/action', {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-uisight-token': tokenOku() },
     body: JSON.stringify(body),
@@ -64,14 +64,14 @@ async function action(body) {
 // --- Engine lifecycle: ready = server responds AND at least one session is up ---
 const isReady = async (ms) => {
   const d = await getStatus(ms);
-  return !!d?.oturumlar?.length;
+  return !!d?.sessions?.length;
 };
 let child = null;
 async function ensureEngine() {
   try { if (await isReady(1500)) return; } catch {}
-  // Panel kapandiysa YENIDEN baslat: tek-seferlik bayrak, cokme sonrasi araci
-  // kalici olarak olu birakiyordu. shell:true YOK — argv dizisi Node tarafindan
-  // guvenli gecirilir (shell'de UISIGHT_URL enjeksiyon yuzeyi acardi).
+  // Restart the panel if it went away: a one-shot flag used to leave the tool permanently
+  // dead after a crash. No shell:true — the argv array is passed through safely by Node
+  // (a shell would turn UISIGHT_URL into an injection surface).
   if (!child || child.exitCode !== null || child.killed) {
     const url = process.env.UISIGHT_URL || process.env.MOBILQA_URL || 'http://localhost:3000';
     log(`panel not running on ${PORT} — starting (${url})`);
@@ -95,34 +95,34 @@ const image = (b64) => ({ type: 'image', data: b64, mimeType: 'image/jpeg' });
 function inspectionText(results) {
   const out = [];
   for (const s of results) {
-    if (s.hata) { out.push(`[${s.oturum}] INSPECTION ERROR: ${s.hata}`); continue; }
-    const d = s.denetim || {};
-    out.push(`\n[${s.oturum} · ${s.etiket} · ${s.tema}] ${s.url}`);
-    if (d.yatayTasma) {
-      out.push(`  HORIZONTAL OVERFLOW: page ${d.yatayTasma.sayfaGenislik}px / viewport ${d.yatayTasma.ekranGenislik}px`);
-      for (const x of (d.yatayTasma.tasan || []).slice(0, 4)) out.push(`    <${x.etiket} class="${x.sinif}"> right edge ${x.sag}px`);
+    if (s.error) { out.push(`[${s.session}] INSPECTION ERROR: ${s.error}`); continue; }
+    const d = s.inspection || {};
+    out.push(`\n[${s.session} · ${s.label} · ${s.theme}] ${s.url}`);
+    if (d.horizontalOverflow) {
+      out.push(`  HORIZONTAL OVERFLOW: page ${d.horizontalOverflow.pageWidth}px / viewport ${d.horizontalOverflow.viewportWidth}px`);
+      for (const x of (d.horizontalOverflow.overflowing || []).slice(0, 4)) out.push(`    <${x.label} class="${x.className}"> right edge ${x.right}px`);
     }
-    for (const x of d.gorunmezMetin || []) out.push(`  INVISIBLE TEXT ${x.oran}:1 — ${x.sec} "${x.metin}" (text ${x.renk} / bg ${x.arka})`);
-    for (const x of d.dusukKontrast || []) out.push(`  low contrast ${x.oran}:1 (threshold ${x.esik}) ${x.boyut} — "${x.metin}"`);
-    for (const x of d.butonSorun || []) out.push(`  BUTTON ${x.sec} "${x.metin}" → ${x.sorunlar.join(' · ')}`);
-    for (const x of (d.kucukHedefler || []).slice(0, 8)) out.push(`  touch target below 44px ${x.olcu} — "${x.metin}"`);
-    if (d.minikYazi?.length) out.push(`  text below 12px (${d.minikYazi.length}): ` + d.minikYazi.map((m) => `${m.boyut} "${m.metin}"`).join(' · '));
-    if (d.gorselAltsiz) out.push(`  images without alt: ${d.gorselAltsiz}`);
-    const clean = !d.yatayTasma && !d.gorunmezMetin?.length && !d.dusukKontrast?.length && !d.butonSorun?.length && !d.kucukHedefler?.length && !d.minikYazi?.length;
+    for (const x of d.invisibleText || []) out.push(`  INVISIBLE TEXT ${x.ratio}:1 — ${x.sel} "${x.text}" (text ${x.color} / bg ${x.bg})`);
+    for (const x of d.lowContrast || []) out.push(`  low contrast ${x.ratio}:1 (threshold ${x.threshold}) ${x.fontSize} — "${x.text}"`);
+    for (const x of d.buttonIssues || []) out.push(`  BUTTON ${x.sel} "${x.text}" → ${x.issues.join(' · ')}`);
+    for (const x of (d.smallTargets || []).slice(0, 8)) out.push(`  touch target below 44px ${x.size} — "${x.text}"`);
+    if (d.tinyText?.length) out.push(`  text below 12px (${d.tinyText.length}): ` + d.tinyText.map((m) => `${m.fontSize} "${m.text}"`).join(' · '));
+    if (d.imagesWithoutAlt) out.push(`  images without alt: ${d.imagesWithoutAlt}`);
+    const clean = !d.horizontalOverflow && !d.invisibleText?.length && !d.lowContrast?.length && !d.buttonIssues?.length && !d.smallTargets?.length && !d.tinyText?.length;
     if (clean) out.push('  automated checks clean (use see_screen for design issues the numbers cannot catch)');
   }
   return out.join('\n');
 }
 
 // --- Server + bilingual tool registration ---
-// Surumu package.json'dan oku — sabit-kodlu deger her yayinda bayatliyordu.
+// Read the version from package.json — a hard-coded value went stale on every release.
 const SURUM = (() => {
   try { return JSON.parse(readFileSync(join(ROOT, '..', 'package.json'), 'utf8')).version; } catch { return '0.0.0'; }
 })();
 const server = new McpServer({ name: 'uisight', version: SURUM });
 
-const SESSION = z.enum(['desktop', 'mobile', 'web', 'mobil']).optional()
-  .describe(TR ? "Hedef oturum: 'desktop' (masaustu) | 'mobile' (telefon). Varsayilan: mobile" : "Target session: 'desktop' | 'mobile'. Default: mobile");
+const SESSION = z.enum(['desktop', 'mobile']).optional()
+  .describe(TR ? "Hedef session: 'desktop' (masaustu) | 'mobile' (telefon). Varsayilan: mobile" : "Target session: 'desktop' | 'mobile'. Default: mobile");
 
 /** Registers a tool under its EN name, or TR name when UISIGHT_LANG=tr. */
 function tool(enName, trName, enDesc, trDesc, schema, handler) {
@@ -131,68 +131,68 @@ function tool(enName, trName, enDesc, trDesc, schema, handler) {
 
 tool('see_screen', 'ekrani_gor',
   'Returns the current screen of the live session as an image — the EXACT same screen the user sees in the panel. full=true for full page.',
-  'Canli oturumun o anki ekranini goruntu olarak dondurur. Kullanicinin panelde gordugu ekranin AYNISI. tam=true ile tam sayfa.',
+  'Canli oturumun o anki ekranini goruntu olarak dondurur. Kullanicinin panelde gordugu ekranin AYNISI. tam sayfa icin full=true.',
   { session: SESSION, full: z.boolean().optional().describe(TR ? 'Tam sayfa (uzun, daha pahali)' : 'Full-page capture (longer, more expensive)') },
   async ({ session, full }) => {
     await ensureEngine();
-    const r = await req(`/kare?oturum=${sid(session)}${full ? '&tam=1' : ''}`, {}, 30000);
+    const r = await req(`/frame?session=${sid(session)}${full ? '&full=1' : ''}`, {}, 30000);
     if (!r.ok) return { content: [text(`could not capture frame: HTTP ${r.status}`)], isError: true };
     const b64 = Buffer.from(await r.arrayBuffer()).toString('base64');
     const d = await getStatus().catch(() => null);
-    const o = d?.oturumlar?.find((x) => x.id === sid(session));
-    return { content: [image(b64), text(`${o?.etiket || session || 'mobile'} · ${d?.tema} · ${d?.url}`)] };
+    const o = d?.sessions?.find((x) => x.id === sid(session));
+    return { content: [image(b64), text(`${o?.label || session || 'mobile'} · ${d?.theme} · ${d?.url}`)] };
   });
 
-tool('inspect', 'denetle',
+tool('inspect', 'inspect',
   'Runs color/contrast/theme/button/overflow checks on the open page; returns MEASURED findings as text (cheaper and more precise than images). Without session, inspects ALL sessions.',
-  'Acik sayfada renk/kontrast/tema/buton/tasma denetimi kosar; OLCULMUS bulgulari metin olarak dondurur. oturum verilmezse TUM oturumlar denetlenir.',
+  'Acik sayfada color/contrast/theme/buton/tasma denetimi kosar; OLCULMUS bulgulari text olarak dondurur. session verilmezse TUM sessions denetlenir.',
   { session: SESSION },
   async ({ session }) => {
     await ensureEngine();
-    const r = await action({ tip: 'denetle', ...(session ? { oturum: sid(session) } : {}) });
-    if (!r.ok) return { content: [text(`inspection failed: ${r.mesaj}`)], isError: true };
-    return { content: [text(inspectionText(r.sonuclar))] };
+    const r = await action({ type: 'inspect', ...(session ? { session: sid(session) } : {}) });
+    if (!r.ok) return { content: [text(`inspection failed: ${r.message}`)], isError: true };
+    return { content: [text(inspectionText(r.results))] };
   });
 
-tool('goto', 'git',
+tool('goto', 'goto',
   'Navigates ALL sessions to the given URL (URL-synced). localhost included.',
   'TUM oturumlari verilen adrese goturur (URL-senkron). localhost dahil.',
   { url: z.string().describe('URL to open') },
   async ({ url }) => {
     await ensureEngine();
-    const r = await action({ tip: 'git', url });
+    const r = await action({ type: 'goto', url });
     const d = await getStatus().catch(() => null);
-    return { content: [text(r.ok ? `navigated: ${d?.url || url}` : `error: ${r.mesaj}`)], ...(r.ok ? {} : { isError: true }) };
+    return { content: [text(r.ok ? `navigated: ${d?.url || url}` : `error: ${r.message}`)], ...(r.ok ? {} : { isError: true }) };
   });
 
-tool('tap', 'tikla',
+tool('tap', 'click',
   'Clicks via CSS selector or coordinates. With a selector, coordinates are not needed. The user sees it happen live in the panel.',
-  'Secici (CSS) veya koordinatla tiklar. Kullanici paneli aninda gorur.',
+  'CSS secici veya koordinatla tiklar. Kullanici paneli aninda gorur.',
   { session: SESSION, selector: z.string().optional().describe("CSS selector, e.g. 'a[href*=\"/login\"]' — more robust than coordinates"), x: z.number().optional(), y: z.number().optional() },
   async ({ session, selector, x, y }) => {
     await ensureEngine();
-    const r = await action({ tip: 'tikla', oturum: session ? sid(session) : undefined, secici: selector, x, y });
-    return { content: [text(r.ok ? `tapped (${r.oturum})` : `error: ${r.mesaj}`)], ...(r.ok ? {} : { isError: true }) };
+    const r = await action({ type: 'click', session: session ? sid(session) : undefined, selector: selector, x, y });
+    return { content: [text(r.ok ? `tapped (${r.session})` : `error: ${r.message}`)], ...(r.ok ? {} : { isError: true }) };
   });
 
 tool('type_text', 'yaz',
   'Types text into the focused field, or presses a special key (Enter, Tab, Escape, Backspace, ArrowDown...).',
-  'Odaklanmis alana metin yazar veya ozel tus basar.',
+  'Odaklanmis alana metin yazar veya ozel tusa basar.',
   { session: SESSION, text: z.string().optional(), key: z.string().optional().describe('Special key name') },
   async ({ session, text: t, key }) => {
     await ensureEngine();
-    const r = await action({ tip: 'tus', oturum: session ? sid(session) : undefined, text: t, key });
-    return { content: [text(r.ok ? 'typed' : `error: ${r.mesaj}`)], ...(r.ok ? {} : { isError: true }) };
+    const r = await action({ type: 'press', session: session ? sid(session) : undefined, text: t, key });
+    return { content: [text(r.ok ? 'typed' : `error: ${r.message}`)], ...(r.ok ? {} : { isError: true }) };
   });
 
-tool('scroll', 'kaydir',
+tool('scroll', 'scroll',
   'Scrolls the page vertically. dy>0 down, dy<0 up (pixels).',
   'Sayfayi dikey kaydirir. dy>0 asagi, dy<0 yukari (piksel).',
   { session: SESSION, dy: z.number().describe('Scroll amount in px') },
   async ({ session, dy }) => {
     await ensureEngine();
-    const r = await action({ tip: 'kaydir', oturum: session ? sid(session) : undefined, dy });
-    return { content: [text(r.ok ? `scrolled ${dy}px (${r.oturum})` : `error: ${r.mesaj}`)], ...(r.ok ? {} : { isError: true }) };
+    const r = await action({ type: 'scroll', session: session ? sid(session) : undefined, dy });
+    return { content: [text(r.ok ? `scrolled ${dy}px (${r.session})` : `error: ${r.message}`)], ...(r.ok ? {} : { isError: true }) };
   });
 
 tool('set_device', 'cihaz_degistir',
@@ -201,44 +201,44 @@ tool('set_device', 'cihaz_degistir',
   { session: SESSION, device: z.string().optional().describe('Profile key'), theme: z.enum(['light', 'dark']).optional() },
   async ({ session, device, theme }) => {
     await ensureEngine();
-    const r = await action({ tip: 'cihaz', oturum: session ? sid(session) : undefined, cihaz: device, tema: theme });
+    const r = await action({ type: 'device', session: session ? sid(session) : undefined, device: device, theme: theme });
     const d = await getStatus().catch(() => null);
-    return { content: [text(r.ok ? `done — sessions: ${d?.oturumlar?.map((o) => `${o.id}=${o.cihaz}`).join(', ')} · theme=${d?.tema}` : `error: ${r.mesaj}`)], ...(r.ok ? {} : { isError: true }) };
+    return { content: [text(r.ok ? `done — sessions: ${d?.sessions?.map((o) => `${o.id}=${o.device}`).join(', ')} · theme=${d?.theme}` : `error: ${r.message}`)], ...(r.ok ? {} : { isError: true }) };
   });
 
-tool('status', 'durum',
+tool('status', 'state',
   'Returns the open URL, sessions (device+viewport) and recent console/network/mark records. FIRST tool to reach for when hunting a bug.',
-  'Acik adres, oturumlar ve son konsol/ag/isaret kayitlarini dondurur.',
+  'Acik adresi, oturumlari ve son konsol/ag/isaret kayitlarini dondurur.',
   {},
   async () => {
     await ensureEngine();
     const d = await getStatus();
-    const out = [`url: ${d.url}`, `theme: ${d.tema}${d.hata ? `\nPAGE ERROR: ${d.hata}` : ''}`];
-    for (const o of d.oturumlar) out.push(`session ${o.id}: ${o.etiket} (${o.viewport.width}x${o.viewport.height})`);
-    const recs = (d.kayitlar || []).slice(-20);
+    const out = [`url: ${d.url}`, `theme: ${d.theme}${d.error ? `\nPAGE ERROR: ${d.error}` : ''}`];
+    for (const o of d.sessions) out.push(`session ${o.id}: ${o.label} (${o.viewport.width}x${o.viewport.height})`);
+    const recs = (d.records || []).slice(-20);
     if (recs.length) {
       out.push('\nrecent records (console/network/marks):');
-      for (const k of recs) out.push(`  [${k.oturum}] ${k.tip}: ${k.mesaj}`);
+      for (const k of recs) out.push(`  [${k.session}] ${k.type}: ${k.message}`);
     } else out.push('no records (console/network clean)');
     return { content: [text(out.join('\n'))] };
   });
 
-tool('marks', 'isaretler',
+tool('marks', 'marks',
   "Returns the notes the user pinned in the panel (📌) together with the screen frame at that moment — the human→AI channel. clear=true marks them read (default true).",
   'Kullanicinin panelde 📌 ile biraktigi notlari + o anki kareyi dondurur.',
   { clear: z.boolean().optional().describe('Drop returned marks from the queue (default true)') },
   async ({ clear }) => {
     await ensureEngine();
-    const r = await req(`/isaretler${clear === false ? '' : '?temizle=1'}`, {}, 10000);
-    const { isaretler } = await r.json();
-    if (!isaretler.length) return { content: [text('no pending marks')] };
+    const r = await req(`/marks${clear === false ? '' : '?clear=1'}`, {}, 10000);
+    const { marks } = await r.json();
+    if (!marks.length) return { content: [text('no pending marks')] };
     const content = [];
-    const lines = [`${isaretler.length} mark(s):`];
-    for (const i of isaretler) lines.push(`- [${i.zaman}] ${i.oturum}/${i.cihaz} ${i.tema} ${i.url}\n  note: ${i.not || '(empty)'}`);
+    const lines = [`${marks.length} mark(s):`];
+    for (const i of marks) lines.push(`- [${i.time}] ${i.session}/${i.device} ${i.theme} ${i.url}\n  note: ${i.note || '(empty)'}`);
     content.push(text(lines.join('\n')));
     try {
-      const last = isaretler[isaretler.length - 1];
-      content.push(image(readFileSync(last.gorselYol).toString('base64')));
+      const last = marks[marks.length - 1];
+      content.push(image(readFileSync(last.imagePath).toString('base64')));
     } catch {}
     return { content };
   });

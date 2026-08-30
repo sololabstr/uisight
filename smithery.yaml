@@ -1,0 +1,31 @@
+# Smithery listing (https://smithery.ai) — lets Smithery start uisight's MCP server.
+# Nothing here is required for normal use: `npx -y uisight-mcp` works on its own.
+startCommand:
+  type: stdio
+  configSchema:
+    type: object
+    required: []
+    properties:
+      uisightUrl:
+        type: string
+        title: Initial URL
+        description: Page the live sessions open on first (default http://localhost:3000)
+      uisightPort:
+        type: number
+        title: Panel port
+        description: Port for the local panel server (default 5055)
+      uisightLang:
+        type: string
+        enum: [en, tr]
+        title: Tool language
+        description: Set to "tr" for Turkish tool names (ekrani_gor, denetle, ...)
+  commandFunction: |-
+    (config) => ({
+      command: 'npx',
+      args: ['-y', 'uisight-mcp'],
+      env: {
+        ...(config.uisightUrl ? { UISIGHT_URL: config.uisightUrl } : {}),
+        ...(config.uisightPort ? { UISIGHT_PORT: String(config.uisightPort) } : {}),
+        ...(config.uisightLang ? { UISIGHT_LANG: config.uisightLang } : {})
+      }
+    })

@@ -1,20 +1,21 @@
 #!/usr/bin/env node
 /**
- * SoloLabs mobil QA — CANLI PANEL (cok oturumlu, senkron).
+ * uisight — LIVE PANEL (multi-session, synchronised).
  *
- * Web + mobil AYNI ANDA yan yana: her oturum kendi Playwright baglami,
- * ekranlar CDP screencast ile canli akar. Panelde tiklarsin/yazarsin ->
+ * Web + mobile side by side at the same time: each session gets its own Playwright
+ * context and streams live over CDP screencast. You click and type in the panel ->
  * ilgili oturuma gider. Adres cubugu TUM oturumlara gider (URL-senkron).
  * AI ayni oturumlari MCP uzerinden gorur/olcer/eller (mcp.mjs).
  *
  * Kullanim:
- *   node sunucu.mjs http://localhost:3000                  # web(masaustu) + mobil(pixel)
- *   node sunucu.mjs <url> --cihaz iphone-se --web laptop   # profillleri sec
- *   node sunucu.mjs <url> --tek                            # yalniz mobil oturum
- *   MOBILQA_YEDEK=1 node sunucu.mjs <url>                  # screencast yerine yedek akis (test)
+ *   node server.mjs http://localhost:3000                  # web(masaustu) + mobile(pixel)
+ *   node server.mjs <url> --device iphone-se --web laptop   # profillleri sel
+ *   node server.mjs <url> --single                         # mobile session only
+ *   UISIGHT_FALLBACK=1 node server.mjs <url>               # fallback stream instead of screencast (testing)
  *
- * Insan -> AI kanali: paneldeki "Isaretle" not+kareyi canli/isaretler/ kuyruguna yazar;
- * AI bunlari MCP `isaretler` araciyla okur.
+ * Human -> AI channel: the panel's "Mark" button queues a note + the current frame
+ * under live/marks/;
+ * AI bunlari MCP `marks` araciyla okur.
  */
 
 import { createServer } from 'node:http';
@@ -25,55 +26,55 @@ import { fileURLToPath } from 'node:url';
 import { exec } from 'node:child_process';
 import { homedir, platform } from 'node:os';
 import { randomUUID } from 'node:crypto';
-import { PROFILLER, cihazAyari, DENETIM_KODU } from './cli.mjs';
+import { PROFILES, deviceSettings, INSPECTION_SCRIPT } from './cli.mjs';
 
 
 // Live artifacts live under the user's home — never inside the package (npx → node_modules).
-const CANLI_DIR = join(homedir(), '.uisight', 'live');
-const ISARET_DIR = join(CANLI_DIR, 'marks');
-const OKUNDU_DIR = join(ISARET_DIR, 'read');
-for (const d of [CANLI_DIR, ISARET_DIR, OKUNDU_DIR]) mkdirSync(d, { recursive: true });
+const LIVE_DIR = join(homedir(), '.uisight', 'live');
+const MARKS_DIR = join(LIVE_DIR, 'marks');
+const READ_DIR = join(MARKS_DIR, 'read');
+for (const d of [LIVE_DIR, MARKS_DIR, READ_DIR]) mkdirSync(d, { recursive: true });
 
 // --- Argumanlar ---
 const argv = process.argv.slice(2);
 const arg = (ad, vars) => { const i = argv.indexOf(ad); return i >= 0 && argv[i + 1] ? argv[i + 1] : vars; };
-const DEGER_ALAN = new Set(['--device', '--desktop', '--theme', '--port']);
-let hedefUrl = null;
+const FLAGS_WITH_VALUE = new Set(['--device', '--desktop', '--theme', '--port']);
+let targetUrl = null;
 for (let i = 0; i < argv.length; i++) {
   const a = argv[i];
-  if (DEGER_ALAN.has(a)) { i++; continue; }
+  if (FLAGS_WITH_VALUE.has(a)) { i++; continue; }
   if (a.startsWith('--')) continue;
-  if (!hedefUrl) hedefUrl = a;
+  if (!targetUrl) targetUrl = a;
 }
-hedefUrl = hedefUrl || 'http://localhost:3000';
-if (!/^https?:\/\//.test(hedefUrl)) hedefUrl = 'http://' + hedefUrl;
+targetUrl = targetUrl || 'http://localhost:3000';
+if (!/^https?:\/\//.test(targetUrl)) targetUrl = 'http://' + targetUrl;
 
 const PORT = Number(process.env.UISIGHT_PORT || process.env.MOBILQA_PORT || arg('--port', 5055));
-const ACMA = argv.includes('--no-open');
-const TEK = argv.includes('--single');
-const ZORLA_YEDEK = (process.env.UISIGHT_FALLBACK || process.env.MOBILQA_YEDEK) === '1';
+const NO_OPEN = argv.includes('--no-open');
+const SINGLE = argv.includes('--single');
+const FORCE_FALLBACK = (process.env.UISIGHT_FALLBACK || process.env.MOBILQA_YEDEK) === '1';
 
-// --- Guvenlik: bu araç bir tarayici oturumunu SÜREN yerel bir sunucu. Iki katman:
-//   (1) yalniz loopback'e bind (LAN erisimini keser) — bkz. listen() asagida.
-//   (2) Host allowlist (DNS-rebinding kesici, TÜM uclar) + eylem token (CSRF kesici, mutasyon uclari).
-// Panel kendi origin'inden fetch ederken token'i header'da yollar; kotu niyetli baska
-// bir sekme (ayni makinede localhost'a POST) token'i bilemez ve text/plain-form hilesi
+// --- Security: this tool is a local server that DRIVES a browser session. Two layers:
+//   (1) bind to loopback only (cuts off LAN access) — see listen() below.
+//   (2) Host allowlist (DNS-rebinding guard, ALL endpoints) + an action token (CSRF guard, mutating endpoints).
+// The panel sends the token in a header when it fetches its own origin; a malicious
+// tab (POSTing to localhost from the same machine) cannot know it, and the text/plain form trick
 // custom header EKLEYEMEZ → reddedilir.
 const TOKEN = randomUUID();
-// Token'i port basina yerel dosyaya yaz: MCP sunucusu (ayri surec, ayni makine)
-// bunu okuyup header'da gonderir. Capraz-site bir sayfa bu dosyayi OKUYAMAZ.
-const TOKEN_DOSYA = join(CANLI_DIR, `token-${PORT}`);
+// Write the token to a per-port local file: the MCP server (a separate process on the
+// same machine) reads it and sends it in a header. A cross-site page CANNOT read this file.
+const TOKEN_FILE = join(LIVE_DIR, `token-${PORT}`);
 
-/** Platforma gore tarayici acar. `start` yalniz Windows'ta var; macOS/Linux'ta
- *  sessizce basarisiz oluyordu (exec callback'siz → hicbir iz yok). */
-export function tarayicidaAc(adres) {
+/** Opens the browser per platform. `start` only exists on Windows; on macOS/Linux this
+ *  used to fail silently (exec without a callback left no trace at all). */
+export function openInBrowser(address) {
   const p = platform();
-  const komut = p === 'win32' ? `start "" "${adres}"` : p === 'darwin' ? `open "${adres}"` : `xdg-open "${adres}"`;
-  exec(komut, p === 'win32' ? { shell: 'cmd.exe' } : {}, (e) => {
-    if (e) console.error(`  ! could not open browser (${p}) — open manually: ${adres}`);
+  const command = p === 'win32' ? `start "" "${address}"` : p === 'darwin' ? `open "${address}"` : `xdg-open "${address}"`;
+  exec(command, p === 'win32' ? { shell: 'cmd.exe' } : {}, (e) => {
+    if (e) console.error(`  ! could not open browser (${p}) — open manually: ${address}`);
   });
 }
-function hostGuvenli(req) {
+function hostAllowed(req) {
   const h = String(req.headers.host || '');
   const port = h.split(':')[1] || '';
   const ana = h.split(':')[0].toLowerCase();
@@ -81,118 +82,118 @@ function hostGuvenli(req) {
     && (port === '' || port === String(PORT));
 }
 
-// --- Genel durum ---
-const durum = {
-  url: hedefUrl,
-  tema: arg('--theme', 'light'),
-  hata: null,
-  kayitlar: [], // son 100 konsol/ag kaydi (ring)
+// --- Genel state ---
+const state = {
+  url: targetUrl,
+  theme: arg('--theme', 'light'),
+  error: null,
+  records: [], // last 100 console/network records (ring buffer)
 };
 
-/** id -> oturum. Sabit kimlikler: 'web' (masaustu sinifi), 'mobil' (telefon sinifi). */
-const oturumlar = new Map();
-let tarayici = null;
-const istemciler = new Set(); // SSE
+/** id -> session. Fixed ids: 'web' (desktop class), 'mobile' (phone class). */
+const sessions = new Map();
+let browser = null;
+const clients = new Set(); // SSE
 
 // --- Yardimcilar ---
-function yayinla(olay, veri) {
-  const paket = `event: ${olay}\ndata: ${JSON.stringify(veri)}\n\n`;
-  for (const r of istemciler) { try { r.write(paket); } catch { istemciler.delete(r); } }
+function broadcast(event, data) {
+  const packet = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+  for (const r of clients) { try { r.write(packet); } catch { clients.delete(r); } }
 }
 
-function kayitEkle(oturumId, tip, mesaj) {
-  const k = { zaman: new Date().toISOString(), oturum: oturumId, tip, mesaj: String(mesaj).slice(0, 200) };
-  durum.kayitlar.push(k);
-  if (durum.kayitlar.length > 100) durum.kayitlar.shift();
-  yayinla('log', k);
+function addRecord(sessionId, type, message) {
+  const k = { time: new Date().toISOString(), session: sessionId, type, message: String(message).slice(0, 200) };
+  state.records.push(k);
+  if (state.records.length > 100) state.records.shift();
+  broadcast('log', k);
 }
 
-const kamuDurum = () => ({
-  url: durum.url,
-  tema: durum.tema,
-  hata: durum.hata,
-  oturumlar: [...oturumlar.values()].map((o) => ({
-    id: o.id, cihaz: o.cihazKey, etiket: o.profil.etiket, viewport: o.viewport, mobil: o.profil.mobil !== false,
+const publicState = () => ({
+  url: state.url,
+  theme: state.theme,
+  error: state.error,
+  sessions: [...sessions.values()].map((o) => ({
+    id: o.id, device: o.deviceKey, label: o.profile.label, viewport: o.viewport, mobile: o.profile.mobile !== false,
   })),
-  cihazlar: Object.entries(PROFILLER).map(([k, v]) => ({ k, etiket: v.etiket, mobil: v.mobil !== false })),
-  kayitlar: durum.kayitlar.slice(-30),
+  devices: Object.entries(PROFILES).map(([k, v]) => ({ k, label: v.label, mobile: v.mobile !== false })),
+  records: state.records.slice(-30),
 });
 
-// --- Oturum yasam dongusu ---
-async function oturumKapat(o) {
+// --- Session lifecycle ---
+async function closeSession(o) {
   if (!o) return;
-  if (o.yedekZamanlayici) { clearInterval(o.yedekZamanlayici); o.yedekZamanlayici = null; }
+  if (o.fallbackTimer) { clearInterval(o.fallbackTimer); o.fallbackTimer = null; }
   if (o.cdp) { try { o.cdp.removeAllListeners(); await o.cdp.detach(); } catch {} o.cdp = null; }
   if (o.ctx) { try { await o.ctx.close(); } catch {} o.ctx = null; }
 }
 
-async function oturumKur(id, cihazKey, tema) {
-  await oturumKapat(oturumlar.get(id));
-  oturumlar.delete(id); // yeniden kurulum bitene dek eylemler bu oturumu gormesin
+async function openSession(id, deviceKey, theme) {
+  await closeSession(sessions.get(id));
+  sessions.delete(id); // hide this session from actions until the rebuild finishes
 
-  const profil = PROFILLER[cihazKey] || PROFILLER[id === 'web' ? 'desktop' : 'pixel'];
-  const ayar = cihazAyari(profil.pw);
-  if (!tarayici) tarayici = await chromium.launch();
+  const profile = PROFILES[deviceKey] || PROFILES[id === 'web' ? 'desktop' : 'pixel'];
+  const settings = deviceSettings(profile.pw);
+  if (!browser) browser = await chromium.launch();
 
-  const ctx = await tarayici.newContext({ ...ayar, colorScheme: tema, locale: 'tr-TR' });
-  const sayfa = await ctx.newPage();
+  const ctx = await browser.newContext({ ...settings, colorScheme: theme, locale: 'tr-TR' });
+  const page = await ctx.newPage();
   const o = {
-    id, cihazKey, profil, ctx, sayfa, cdp: null, yedekZamanlayici: null,
-    viewport: ayar.viewport, sonKare: null, sonYazma: 0,
+    id, deviceKey, profile, ctx, page, cdp: null, fallbackTimer: null,
+    viewport: settings.viewport, lastFrame: null, lastWrite: 0,
   };
-  // Map'e kayit ILK goto tamamlandiktan SONRA yapilir: kurulum goto'su ile disaridan
+  // Register in the map only AFTER the first goto completes: otherwise the setup goto and an
   // gelen `git` eylemi ayni sayfada yarisirsa Chromium gec kalan navigasyonu
-  // chrome-error olarak commit edebiliyor (17 Agu MCP canli testinde yasandi).
+  // chrome-error olarak commit edebiliyor (17 Agu MCP live testinde yasandi).
 
-  sayfa.on('pageerror', (e) => kayitEkle(id, 'js-hata', e));
-  sayfa.on('console', (m) => { if (m.type() === 'error') kayitEkle(id, 'konsol', m.text()); });
-  sayfa.on('response', (r) => { if (r.status() >= 400) kayitEkle(id, 'ag', `${r.status()} ${r.url().slice(0, 120)}`); });
-  sayfa.on('framenavigated', (f) => {
-    if (f === sayfa.mainFrame()) { durum.url = f.url(); yayinla('durum', kamuDurum()); }
+  page.on('pageerror', (e) => addRecord(id, 'js-error', e));
+  page.on('console', (m) => { if (m.type() === 'error') addRecord(id, 'console', m.text()); });
+  page.on('response', (r) => { if (r.status() >= 400) addRecord(id, 'network', `${r.status()} ${r.url().slice(0, 120)}`); });
+  page.on('framenavigated', (f) => {
+    if (f === page.mainFrame()) { state.url = f.url(); broadcast('state', publicState()); }
   });
 
   try {
-    await sayfa.goto(durum.url, { waitUntil: 'domcontentloaded', timeout: 30000 });
-    durum.hata = null;
+    await page.goto(state.url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    state.error = null;
   } catch (e) {
-    durum.hata = String(e).split('\n')[0].slice(0, 160);
-    kayitEkle(id, 'sayfa', durum.hata);
+    state.error = String(e).split('\n')[0].slice(0, 160);
+    addRecord(id, 'page', state.error);
   }
 
-  oturumlar.set(id, o); // sayfa oturdu — artik eylemlere acik
-  await akisBaslat(o);
-  yayinla('durum', kamuDurum());
+  sessions.set(id, o); // page oturdu — artik eylemlere acik
+  await startStream(o);
+  broadcast('state', publicState());
   return o;
 }
 
-/** Kare akisi: once CDP screencast (3 deneme), olmazsa saniyede-bir goruntuye duser.
- *  Screencast tek basina kritik degil — patlarsa panel yine calisir. */
-async function akisBaslat(o) {
-  if (o.yedekZamanlayici) { clearInterval(o.yedekZamanlayici); o.yedekZamanlayici = null; }
+/** Frame stream: CDP screencast first (3 attempts), falling back to a screenshot per second.
+ *  Screencast is not critical on its own — if it dies the panel still works. */
+async function startStream(o) {
+  if (o.fallbackTimer) { clearInterval(o.fallbackTimer); o.fallbackTimer = null; }
 
   // CDP setup can silently hang on a second context — cap every attempt at 5s
   // and fall through to the screenshot-interval fallback (seen 2026-08-19).
-  const zamanli = (p, ms) => Promise.race([p, new Promise((_, r) => setTimeout(() => r(new Error(`timeout ${ms}ms`)), ms))]);
+  const withTimeout = (p, ms) => Promise.race([p, new Promise((_, r) => setTimeout(() => r(new Error(`timeout ${ms}ms`)), ms))]);
 
-  if (!ZORLA_YEDEK) {
-    for (let deneme = 1; deneme <= 3; deneme++) {
+  if (!FORCE_FALLBACK) {
+    for (let attempt = 1; attempt <= 3; attempt++) {
       try {
-        o.cdp = await zamanli(o.ctx.newCDPSession(o.sayfa), 5000);
+        o.cdp = await withTimeout(o.ctx.newCDPSession(o.page), 5000);
         o.cdp.on('Page.screencastFrame', async ({ data, sessionId }) => {
           try { await o.cdp.send('Page.screencastFrameAck', { sessionId }); } catch {}
-          kareIsle(o, data);
+          handleFrame(o, data);
         });
-        await zamanli(o.cdp.send('Page.startScreencast', {
+        await withTimeout(o.cdp.send('Page.startScreencast', {
           format: 'jpeg', quality: 70,
           maxWidth: o.viewport.width, maxHeight: o.viewport.height, everyNthFrame: 1,
         }), 5000);
         console.log(`  stream[${o.id}]: CDP screencast (live)`);
         // First-frame guarantee: screencast only emits on repaint — a fully static
         // page would leave the pane blank until something moves.
-        try { kareIsle(o, (await o.sayfa.screenshot({ type: 'jpeg', quality: 70, scale: 'css' })).toString('base64')); } catch {}
+        try { handleFrame(o, (await o.page.screenshot({ type: 'jpeg', quality: 70, scale: 'css' })).toString('base64')); } catch {}
         return;
       } catch (e) {
-        console.error(`  ! screencast[${o.id}] attempt ${deneme}/3 — ${String(e).split('\n')[0].slice(0, 90)}`);
+        console.error(`  ! screencast[${o.id}] attempt ${attempt}/3 — ${String(e).split('\n')[0].slice(0, 90)}`);
         try { o.cdp?.removeAllListeners(); await o.cdp?.detach(); } catch {}
         o.cdp = null;
         await new Promise((r) => setTimeout(r, 800));
@@ -200,182 +201,182 @@ async function akisBaslat(o) {
     }
   }
 
-  console.log(`  stream[${o.id}]: FALLBACK mode — one frame per second${ZORLA_YEDEK ? ' (UISIGHT_FALLBACK=1)' : ''}`);
-  o.yedekZamanlayici = setInterval(async () => {
-    if (!o.sayfa) return;
-    try { kareIsle(o, (await o.sayfa.screenshot({ type: 'jpeg', quality: 70, scale: 'css' })).toString('base64')); } catch {}
+  console.log(`  stream[${o.id}]: FALLBACK mode — one frame per second${FORCE_FALLBACK ? ' (UISIGHT_FALLBACK=1)' : ''}`);
+  o.fallbackTimer = setInterval(async () => {
+    if (!o.page) return;
+    try { handleFrame(o, (await o.page.screenshot({ type: 'jpeg', quality: 70, scale: 'css' })).toString('base64')); } catch {}
   }, 1000);
 }
 
-function kareIsle(o, b64) {
-  o.sonKare = b64;
-  yayinla('kare', { oturum: o.id, img: b64 });
+function handleFrame(o, b64) {
+  o.lastFrame = b64;
+  broadcast('frame', { session: o.id, img: b64 });
   const t = Date.now();
-  if (t - o.sonYazma > 1000) {
-    o.sonYazma = t;
-    try { writeFileSync(join(CANLI_DIR, `last-${o.id}.jpg`), Buffer.from(b64, 'base64')); } catch {}
+  if (t - o.lastWrite > 1000) {
+    o.lastWrite = t;
+    try { writeFileSync(join(LIVE_DIR, `last-${o.id}.jpg`), Buffer.from(b64, 'base64')); } catch {}
   }
 }
 
 // --- Eylemler ---
-const normUrl = (u) => (/^https?:\/\//.test(u) ? u : 'http://' + u);
+const normalizeUrl = (u) => (/^https?:\/\//.test(u) ? u : 'http://' + u);
 
-/** tikla/yaz/kaydir icin hedef oturum; belirtilmemisse mobil, o da yoksa ilk oturum. */
-const hedefOturum = (g) => oturumlar.get(g.oturum) || oturumlar.get('mobil') || [...oturumlar.values()][0];
+/** Target session for click/type/scroll; defaults to mobile, then to the first session. */
+const targetSession = (g) => sessions.get(g.session) || sessions.get('mobile') || [...sessions.values()][0];
 
-async function eylemUygula(g) {
-  if (!oturumlar.size) return { ok: false, mesaj: 'no session ready yet' };
+async function applyAction(g) {
+  if (!sessions.size) return { ok: false, message: 'no session ready yet' };
 
-  switch (g.tip) {
-    case 'git': {
-      durum.url = normUrl(g.url);
-      for (const o of oturumlar.values()) {
-        await o.sayfa.goto(durum.url, { waitUntil: 'domcontentloaded', timeout: 30000 })
-          .catch((e) => kayitEkle(o.id, 'sayfa', String(e).split('\n')[0]));
+  switch (g.type) {
+    case 'goto': {
+      state.url = normalizeUrl(g.url);
+      for (const o of sessions.values()) {
+        await o.page.goto(state.url, { waitUntil: 'domcontentloaded', timeout: 30000 })
+          .catch((e) => addRecord(o.id, 'page', String(e).split('\n')[0]));
       }
       return { ok: true };
     }
-    case 'geri': for (const o of oturumlar.values()) await o.sayfa.goBack().catch(() => {}); return { ok: true };
-    case 'ileri': for (const o of oturumlar.values()) await o.sayfa.goForward().catch(() => {}); return { ok: true };
-    case 'yenile': for (const o of oturumlar.values()) await o.sayfa.reload().catch(() => {}); return { ok: true };
+    case 'back': for (const o of sessions.values()) await o.page.goBack().catch(() => {}); return { ok: true };
+    case 'forward': for (const o of sessions.values()) await o.page.goForward().catch(() => {}); return { ok: true };
+    case 'reload': for (const o of sessions.values()) await o.page.reload().catch(() => {}); return { ok: true };
 
-    case 'tikla': {
-      const o = hedefOturum(g);
-      if (g.secici) { await o.sayfa.click(g.secici, { timeout: 5000 }); return { ok: true, oturum: o.id }; }
-      if (o.profil.mobil !== false) await o.sayfa.touchscreen.tap(g.x, g.y);
-      else await o.sayfa.mouse.click(g.x, g.y);
-      return { ok: true, oturum: o.id };
+    case 'click': {
+      const o = targetSession(g);
+      if (g.selector) { await o.page.click(g.selector, { timeout: 5000 }); return { ok: true, session: o.id }; }
+      if (o.profile.mobile !== false) await o.page.touchscreen.tap(g.x, g.y);
+      else await o.page.mouse.click(g.x, g.y);
+      return { ok: true, session: o.id };
     }
-    case 'kaydir': {
-      const o = hedefOturum(g);
-      await o.sayfa.mouse.move(o.viewport.width / 2, o.viewport.height / 2);
-      await o.sayfa.mouse.wheel(0, g.dy);
-      return { ok: true, oturum: o.id };
+    case 'scroll': {
+      const o = targetSession(g);
+      await o.page.mouse.move(o.viewport.width / 2, o.viewport.height / 2);
+      await o.page.mouse.wheel(0, g.dy);
+      return { ok: true, session: o.id };
     }
-    case 'tus': {
-      const o = hedefOturum(g);
-      if (g.key) await o.sayfa.keyboard.press(g.key);
-      else if (g.text) await o.sayfa.keyboard.type(g.text);
-      return { ok: true, oturum: o.id };
+    case 'press': {
+      const o = targetSession(g);
+      if (g.key) await o.page.keyboard.press(g.key);
+      else if (g.text) await o.page.keyboard.type(g.text);
+      return { ok: true, session: o.id };
     }
 
-    case 'cihaz': {
-      // {oturum, cihaz} -> o oturumun profili degisir; {tema} oturumsuz -> TUM oturumlar yeni temayla kurulur.
-      // Oturum id'si dosya adina giriyor (last-<id>.jpg) → path-traversal'i burada kes.
-      if (g.oturum && !/^[a-zA-Z0-9_-]{1,32}$/.test(String(g.oturum))) {
-        return { ok: false, mesaj: 'invalid session id' };
+    case 'device': {
+      // {session, device} changes that session's profile; {theme} without a session rebuilds ALL sessions in the new theme.
+      // The session id ends up in a filename (last-<id>.jpg) -> stop path traversal right here.
+      if (g.session && !/^[a-zA-Z0-9_-]{1,32}$/.test(String(g.session))) {
+        return { ok: false, message: 'invalid session id' };
       }
-      // Tema TEK oturuma uygulanacaksa global alani degistirme: panel/status
-      // "dark" derken dokunulmayan oturum hala light kalabiliyordu (yalan durum).
-      if (g.tema && !g.oturum) durum.tema = g.tema;
-      if (g.oturum && g.cihaz) {
-        const mevcut = oturumlar.get(g.oturum);
-        await oturumKur(g.oturum, g.cihaz, g.tema || durum.tema);
-        if (!mevcut) kayitEkle(g.oturum, 'oturum', `yeni oturum: ${g.cihaz}`);
+      // When a theme applies to a SINGLE session, leave the global field alone: the panel/status
+      // used to say "dark" while an untouched session was still light (a lying state).
+      if (g.theme && !g.session) state.theme = g.theme;
+      if (g.session && g.device) {
+        const existed = sessions.get(g.session);
+        await openSession(g.session, g.device, g.theme || state.theme);
+        if (!existed) addRecord(g.session, 'session', `new session: ${g.device}`);
       } else {
-        for (const o of [...oturumlar.values()]) await oturumKur(o.id, g.cihaz || o.cihazKey, durum.tema);
+        for (const o of [...sessions.values()]) await openSession(o.id, g.device || o.deviceKey, state.theme);
       }
       return { ok: true };
     }
 
-    case 'denetle': {
-      const sonuclar = [];
-      const hedefler = g.oturum ? [oturumlar.get(g.oturum)].filter(Boolean) : [...oturumlar.values()];
-      for (const o of hedefler) {
+    case 'inspect': {
+      const results = [];
+      const targets = g.session ? [sessions.get(g.session)].filter(Boolean) : [...sessions.values()];
+      for (const o of targets) {
         try {
-          // Timeout: hedef sayfada engelleyici bir native dialog varsa evaluate suresiz asili kalirdi.
-          o.sayfa.setDefaultTimeout(20000);
-          const d = await o.sayfa.evaluate(DENETIM_KODU, { mobil: o.profil.mobil !== false });
-          sonuclar.push({ oturum: o.id, cihaz: o.cihazKey, etiket: o.profil.etiket, tema: durum.tema, url: durum.url, denetim: d });
+          // Timeout: target sayfada engelleyici bir native dialog varsa evaluate suresiz asili kalirdi.
+          o.page.setDefaultTimeout(20000);
+          const d = await o.page.evaluate(INSPECTION_SCRIPT, { mobile: o.profile.mobile !== false });
+          results.push({ session: o.id, device: o.deviceKey, label: o.profile.label, theme: state.theme, url: state.url, inspection: d });
         } catch (e) {
-          sonuclar.push({ oturum: o.id, cihaz: o.cihazKey, hata: String(e).slice(0, 200) });
+          results.push({ session: o.id, device: o.deviceKey, error: String(e).slice(0, 200) });
         }
       }
-      writeFileSync(join(CANLI_DIR, 'inspect.json'), JSON.stringify(sonuclar, null, 2), 'utf8');
-      return { ok: true, sonuclar };
+      writeFileSync(join(LIVE_DIR, 'inspect.json'), JSON.stringify(results, null, 2), 'utf8');
+      return { ok: true, results };
     }
 
-    case 'isaret': {
-      // Insan -> AI: not + o anki kare kuyruga.
-      const o = hedefOturum(g);
+    case 'mark': {
+      // Human -> AI: the note + the current frame go into the queue.
+      const o = targetSession(g);
       const ts = Date.now();
-      const gorselAd = `${ts}-${o.id}.jpg`;
+      const imageName = `${ts}-${o.id}.jpg`;
       try {
-        const buf = o.sonKare
-          ? Buffer.from(o.sonKare, 'base64')
-          : await o.sayfa.screenshot({ type: 'jpeg', quality: 85, scale: 'css' });
-        writeFileSync(join(ISARET_DIR, gorselAd), buf);
+        const buf = o.lastFrame
+          ? Buffer.from(o.lastFrame, 'base64')
+          : await o.page.screenshot({ type: 'jpeg', quality: 85, scale: 'css' });
+        writeFileSync(join(MARKS_DIR, imageName), buf);
       } catch {}
-      const kayit = {
-        zaman: new Date(ts).toISOString(), oturum: o.id, cihaz: o.cihazKey, etiket: o.profil.etiket,
-        tema: durum.tema, url: durum.url, not: String(g.not || '').slice(0, 500), gorsel: gorselAd,
+      const record = {
+        time: new Date(ts).toISOString(), session: o.id, device: o.deviceKey, label: o.profile.label,
+        theme: state.theme, url: state.url, note: String(g.note || '').slice(0, 500), image: imageName,
       };
-      writeFileSync(join(ISARET_DIR, `${ts}.json`), JSON.stringify(kayit, null, 2), 'utf8');
-      kayitEkle(o.id, 'isaret', kayit.not || '(mark without note)');
-      return { ok: true, kayit };
+      writeFileSync(join(MARKS_DIR, `${ts}.json`), JSON.stringify(record, null, 2), 'utf8');
+      addRecord(o.id, 'mark', record.note || '(mark without note)');
+      return { ok: true, record };
     }
 
-    case 'kaydet': {
-      const yollar = {};
-      const hedefler = g.oturum ? [oturumlar.get(g.oturum)].filter(Boolean) : [...oturumlar.values()];
-      for (const o of hedefler) {
-        const yol = join(CANLI_DIR, `last-${o.id}.jpg`);
-        await o.sayfa.screenshot({ path: yol, type: 'jpeg', quality: 90, scale: 'css', fullPage: !!g.tam });
-        yollar[o.id] = yol;
+    case 'save': {
+      const paths = {};
+      const targets = g.session ? [sessions.get(g.session)].filter(Boolean) : [...sessions.values()];
+      for (const o of targets) {
+        const path = join(LIVE_DIR, `last-${o.id}.jpg`);
+        await o.page.screenshot({ path: path, type: 'jpeg', quality: 90, scale: 'css', fullPage: !!g.full });
+        paths[o.id] = path;
       }
-      return { ok: true, yollar };
+      return { ok: true, paths };
     }
 
-    default: return { ok: false, mesaj: 'unknown action' };
+    default: return { ok: false, message: 'unknown action' };
   }
 }
 
-/** Bekleyen isaretleri dondurur; temizle=1 ise okundu/ altina tasir. */
-function isaretleriOku(temizle) {
-  const dosyalar = readdirSync(ISARET_DIR).filter((f) => f.endsWith('.json')).sort();
-  const liste = [];
-  for (const f of dosyalar) {
+/** Returns pending marks; with clear=1 they are moved under read/. */
+function readMarks(clear) {
+  const files = readdirSync(MARKS_DIR).filter((f) => f.endsWith('.json')).sort();
+  const list = [];
+  for (const f of files) {
     try {
-      const k = JSON.parse(readFileSync(join(ISARET_DIR, f), 'utf8'));
-      k.gorselYol = join(ISARET_DIR, k.gorsel);
-      liste.push(k);
-      if (temizle) {
-        renameSync(join(ISARET_DIR, f), join(OKUNDU_DIR, f));
-        try { renameSync(join(ISARET_DIR, k.gorsel), join(OKUNDU_DIR, k.gorsel)); k.gorselYol = join(OKUNDU_DIR, k.gorsel); } catch {}
+      const k = JSON.parse(readFileSync(join(MARKS_DIR, f), 'utf8'));
+      k.imagePath = join(MARKS_DIR, k.image);
+      list.push(k);
+      if (clear) {
+        renameSync(join(MARKS_DIR, f), join(READ_DIR, f));
+        try { renameSync(join(MARKS_DIR, k.image), join(READ_DIR, k.image)); k.imagePath = join(READ_DIR, k.image); } catch {}
       }
     } catch {}
   }
-  return liste;
+  return list;
 }
 
 // --- HTTP ---
-// 1 MB tavan: sinirsiz birikim bellek tuketimine acik kapi birakiyordu.
-const GOVDE_TAVAN = 1024 * 1024;
-const govdeOku = (req) => new Promise((c) => {
+// 1 MB cap: unbounded accumulation was an open door to memory exhaustion.
+const MAX_BODY = 1024 * 1024;
+const readBody = (req) => new Promise((c) => {
   let s = '';
   req.on('data', (d) => {
     s += d;
-    if (s.length > GOVDE_TAVAN) { s = ''; req.destroy(); c({}); }
+    if (s.length > MAX_BODY) { s = ''; req.destroy(); c({}); }
   });
   req.on('end', () => { try { c(JSON.parse(s || '{}')); } catch { c({}); } });
   req.on('error', () => c({}));
 });
 
-const sunucu = createServer(async (req, res) => {
+const server = createServer(async (req, res) => {
   const u = new URL(req.url, `http://localhost:${PORT}`);
 
-  // DNS-rebinding kesici: saldirgan alan adi loopback'e cozulse bile Host basligi tutmaz.
-  if (!hostGuvenli(req)) {
+  // DNS-rebinding guard: even if an attacker's domain resolves to loopback, the Host header will not match.
+  if (!hostAllowed(req)) {
     res.writeHead(403, { 'content-type': 'text/plain' });
     return res.end('forbidden host');
   }
 
-  // Mutasyon uclarinda token ZORUNLU (CSRF kesici). Panel bunu header'da yollar;
-  // capraz-site istekler custom header ekleyemedigi icin buraya hic gelemez.
-  const MUTASYON = new Set(['/eylem']);
-  if (MUTASYON.has(u.pathname) && req.headers['x-uisight-token'] !== TOKEN) {
+  // The token is REQUIRED on mutating endpoints (CSRF guard). The panel sends it in a
+  // header; cross-site requests cannot add custom headers, so they never get this far.
+  const MUTATING = new Set(['/action']);
+  if (MUTATING.has(u.pathname) && req.headers['x-uisight-token'] !== TOKEN) {
     res.writeHead(403, { 'content-type': 'application/json' });
-    return res.end(JSON.stringify({ ok: false, mesaj: 'invalid or missing token' }));
+    return res.end(JSON.stringify({ ok: false, message: 'invalid or missing token' }));
   }
 
   if (u.pathname === '/') {
@@ -383,55 +384,55 @@ const sunucu = createServer(async (req, res) => {
     return res.end(PANEL_HTML_SABLON.replace('__TOKEN__', TOKEN));
   }
 
-  if (u.pathname === '/akis') {
+  if (u.pathname === '/stream') {
     res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' });
     res.write('retry: 2000\n\n');
-    istemciler.add(res);
-    res.on('error', () => istemciler.delete(res));
-    req.on('error', () => istemciler.delete(res));
-    req.on('close', () => istemciler.delete(res));
-    res.write(`event: durum\ndata: ${JSON.stringify(kamuDurum())}\n\n`);
-    for (const o of oturumlar.values()) {
-      if (o.sonKare) res.write(`event: kare\ndata: ${JSON.stringify({ oturum: o.id, img: o.sonKare })}\n\n`);
+    clients.add(res);
+    res.on('error', () => clients.delete(res));
+    req.on('error', () => clients.delete(res));
+    req.on('close', () => clients.delete(res));
+    res.write(`event: state\ndata: ${JSON.stringify(publicState())}\n\n`);
+    for (const o of sessions.values()) {
+      if (o.lastFrame) res.write(`event: frame\ndata: ${JSON.stringify({ session: o.id, img: o.lastFrame })}\n\n`);
     }
     return;
   }
 
-  if (u.pathname === '/eylem' && req.method === 'POST') {
-    const g = await govdeOku(req);
-    let sonuc;
-    try { sonuc = await eylemUygula(g); } catch (e) { sonuc = { ok: false, mesaj: String(e).slice(0, 200) }; }
+  if (u.pathname === '/action' && req.method === 'POST') {
+    const g = await readBody(req);
+    let result;
+    try { result = await applyAction(g); } catch (e) { result = { ok: false, message: String(e).slice(0, 200) }; }
     res.writeHead(200, { 'content-type': 'application/json' });
-    return res.end(JSON.stringify(sonuc));
+    return res.end(JSON.stringify(result));
   }
 
-  if (u.pathname === '/durum') {
+  if (u.pathname === '/state') {
     res.writeHead(200, { 'content-type': 'application/json' });
-    return res.end(JSON.stringify(kamuDurum()));
+    return res.end(JSON.stringify(publicState()));
   }
 
-  if (u.pathname === '/kare') {
-    const o = oturumlar.get(u.searchParams.get('oturum')) || hedefOturum({});
-    if (!o) { res.writeHead(404); return res.end('oturum yok'); }
+  if (u.pathname === '/frame') {
+    const o = sessions.get(u.searchParams.get('session')) || targetSession({});
+    if (!o) { res.writeHead(404); return res.end('no such session'); }
     try {
-      const buf = u.searchParams.get('tam') === '1'
-        ? await o.sayfa.screenshot({ type: 'jpeg', quality: 85, scale: 'css', fullPage: true })
-        : (o.sonKare ? Buffer.from(o.sonKare, 'base64') : await o.sayfa.screenshot({ type: 'jpeg', quality: 85, scale: 'css' }));
-      res.writeHead(200, { 'content-type': 'image/jpeg', 'x-oturum': o.id });
+      const buf = u.searchParams.get('full') === '1'
+        ? await o.page.screenshot({ type: 'jpeg', quality: 85, scale: 'css', fullPage: true })
+        : (o.lastFrame ? Buffer.from(o.lastFrame, 'base64') : await o.page.screenshot({ type: 'jpeg', quality: 85, scale: 'css' }));
+      res.writeHead(200, { 'content-type': 'image/jpeg', 'x-session': o.id });
       return res.end(buf);
     } catch (e) {
       res.writeHead(500, { 'content-type': 'application/json' });
-      return res.end(JSON.stringify({ hata: String(e).slice(0, 200) }));
+      return res.end(JSON.stringify({ error: String(e).slice(0, 200) }));
     }
   }
 
-  if (u.pathname === '/isaretler') {
-    const liste = isaretleriOku(u.searchParams.get('temizle') === '1');
+  if (u.pathname === '/marks') {
+    const list = readMarks(u.searchParams.get('clear') === '1');
     res.writeHead(200, { 'content-type': 'application/json' });
-    return res.end(JSON.stringify({ isaretler: liste }));
+    return res.end(JSON.stringify({ marks: list }));
   }
 
-  res.writeHead(404); res.end('yok');
+  res.writeHead(404); res.end('not found');
 });
 
 // --- Panel ---
@@ -446,7 +447,7 @@ const PANEL_HTML_SABLON = `<!doctype html><html lang="en"><head><meta charset="u
   button:hover { background:#4a4e53; }
   input { cursor:text; }
   #url { flex:1; min-width:160px; }
-  #not { min-width:170px; }
+  #toastLine { min-width:170px; }
   .gov { flex:1; display:flex; gap:14px; padding:14px; overflow:auto; align-items:flex-start; }
   .ekranlar { display:flex; gap:14px; align-items:flex-start; flex-wrap:wrap; }
   .tel { background:#111214; border:2px solid #45474d; border-radius:16px; padding:8px; }
@@ -458,157 +459,157 @@ const PANEL_HTML_SABLON = `<!doctype html><html lang="en"><head><meta charset="u
   .yan { flex:1; min-width:230px; display:flex; flex-direction:column; gap:10px; }
   .kutu { background:#2b2d30; border:1px solid #393b40; border-radius:8px; padding:10px; }
   .kutu h3 { margin:0 0 6px; font-size:12px; text-transform:uppercase; letter-spacing:.06em; color:#9da0a8; }
-  #kayit { font-family:ui-monospace,Consolas,monospace; font-size:11px; max-height:170px; overflow:auto; }
-  #kayit div { padding:2px 0; border-bottom:1px solid #33363b; }
+  #record { font-family:ui-monospace,Consolas,monospace; font-size:11px; max-height:170px; overflow:auto; }
+  #record div { padding:2px 0; border-bottom:1px solid #33363b; }
   .k { color:#ffb4ab; } .u { color:#ffd77a; } .i { color:#8ab4f8; }
-  #bulgu { font-size:12px; max-height:34vh; overflow:auto; }
-  #bulgu ul { margin:4px 0 10px; padding-left:16px; }
-  #bulgu h4 { margin:8px 0 2px; font-size:12px; color:#c3c6cc; }
-  .rozet { display:inline-block; font-size:11px; padding:1px 7px; border-radius:9px; margin:2px 3px 2px 0; }
-  .durumcu { font-size:11px; color:#9da0a8; }
+  #finding { font-size:12px; max-height:34vh; overflow:auto; }
+  #finding ul { margin:4px 0 10px; padding-left:16px; }
+  #finding h4 { margin:8px 0 2px; font-size:12px; color:#c3c6cc; }
+  .badges { display:inline-block; font-size:11px; padding:1px 7px; border-radius:9px; margin:2px 3px 2px 0; }
+  .statusLine { font-size:11px; color:#9da0a8; }
 </style></head><body>
 <div class="ust">
-  <button onclick="ey({tip:'geri'})">◀</button>
-  <button onclick="ey({tip:'ileri'})">▶</button>
-  <button onclick="ey({tip:'yenile'})">⟳</button>
-  <input id="url" onkeydown="if(event.key==='Enter')ey({tip:'git',url:this.value})" placeholder="http://localhost:3000">
-  <button onclick="ey({tip:'git',url:document.getElementById('url').value})">Git</button>
-  <select id="tema" onchange="ey({tip:'cihaz',tema:this.value})">
+  <button onclick="act({type:'back'})">◀</button>
+  <button onclick="act({type:'forward'})">▶</button>
+  <button onclick="act({type:'reload'})">⟳</button>
+  <input id="url" onkeydown="if(event.key==='Enter')act({type:'goto',url:this.value})" placeholder="http://localhost:3000">
+  <button onclick="act({type:'goto',url:document.getElementById('url').value})">Git</button>
+  <select id="theme" onchange="act({type:'device',theme:this.value})">
     <option value="light">light</option><option value="dark">dark</option>
   </select>
   <button onclick="denetle()">Inspect</button>
-  <input id="not" placeholder="mark note (goes to your AI)">
-  <span class="durumcu" id="durumcu"></span>
+  <input id="note" placeholder="mark note (goes to your AI)">
+  <span class="statusLine" id="statusLine"></span>
 </div>
 <div class="gov">
   <div class="ekranlar" id="ekranlar"></div>
   <div class="yan">
-    <div class="kutu"><h3>Inspection</h3><div id="bulgu" class="durumcu">"Inspect" runs color/theme/button checks on every screen; findings come back per device.</div></div>
-    <div class="kutu"><h3>Live log (console · network · marks)</h3><div id="kayit"></div></div>
-    <div class="kutu durumcu">Click a screen = tap on that device · wheel = scroll · click first to type.<br>📌 = drops your note + the current frame into the AI queue (MCP <code>marks</code>).</div>
+    <div class="kutu"><h3>Inspection</h3><div id="finding" class="statusLine">"Inspect" runs color/theme/button checks on every screen; findings come back per device.</div></div>
+    <div class="kutu"><h3>Live log (console · network · marks)</h3><div id="record"></div></div>
+    <div class="kutu statusLine">Click a screen = tap on that device · wheel = scroll · click first to type.<br>📌 = drops your note + the current frame into the AI queue (MCP <code>marks</code>).</div>
   </div>
 </div>
 <script>
   window.__UISIGHT_TOKEN = '__TOKEN__';
-  const vp = {}; // oturum -> viewport
-  let cihazListesi = [];
-  let aktifOturum = 'mobil';
+  const vp = {}; // session -> viewport
+  let deviceList = [];
+  let aktifOturum = 'mobile';
 
-  const ey = (g) => fetch('/eylem', { method:'POST', headers:{'content-type':'application/json','x-uisight-token':window.__UISIGHT_TOKEN}, body: JSON.stringify(g) }).then(r=>r.json());
-  const not = (m) => { document.getElementById('durumcu').textContent = m; setTimeout(()=>{document.getElementById('durumcu').textContent='';}, 4000); };
+  const act = (g) => fetch('/action', { method:'POST', headers:{'content-type':'application/json','x-uisight-token':window.__UISIGHT_TOKEN}, body: JSON.stringify(g) }).then(r=>r.json());
+  const toast = (m) => { document.getElementById('statusLine').textContent = m; setTimeout(()=>{document.getElementById('statusLine').textContent='';}, 4000); };
 
   function paneOlustur(o) {
     const d = document.createElement('div');
-    d.className = 'tel'; d.dataset.oturum = o.id;
+    d.className = 'tel'; d.dataset.session = o.id;
     d.innerHTML = '<header><b>' + o.id + '</b>' +
       '<select class="cihazSec"></select>' +
       '<button class="pin" title="Pin note + frame for your AI">📌</button>' +
       '</header><img tabindex="0" alt="' + o.id + '">';
     const img = d.querySelector('img');
-    const sec = d.querySelector('select');
+    const sel = d.querySelector('select');
 
     img.addEventListener('click', (e) => {
       aktifOturum = o.id; vurgula();
       const r = img.getBoundingClientRect();
       const v = vp[o.id] || { width: r.width, height: r.height };
-      ey({ tip:'tikla', oturum:o.id, x: Math.round((e.clientX-r.left)*(v.width/r.width)), y: Math.round((e.clientY-r.top)*(v.height/r.height)) });
+      act({ type:'click', session:o.id, x: Math.round((e.clientX-r.left)*(v.width/r.width)), y: Math.round((e.clientY-r.top)*(v.height/r.height)) });
       img.focus();
     });
-    img.addEventListener('wheel', (e) => { e.preventDefault(); ey({ tip:'kaydir', oturum:o.id, dy: e.deltaY }); }, { passive:false });
+    img.addEventListener('wheel', (e) => { e.preventDefault(); act({ type:'scroll', session:o.id, dy: e.deltaY }); }, { passive:false });
     img.addEventListener('keydown', (e) => {
-      const ozel = ['Enter','Backspace','Tab','ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Escape','Delete'];
-      if (ozel.includes(e.key)) { e.preventDefault(); ey({ tip:'tus', oturum:o.id, key: e.key }); }
-      else if (e.key.length === 1 && !e.ctrlKey && !e.metaKey) { e.preventDefault(); ey({ tip:'tus', oturum:o.id, text: e.key }); }
+      const specialKeys = ['Enter','Backspace','Tab','ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Escape','Delete'];
+      if (specialKeys.includes(e.key)) { e.preventDefault(); act({ type:'press', session:o.id, key: e.key }); }
+      else if (e.key.length === 1 && !e.ctrlKey && !e.metaKey) { e.preventDefault(); act({ type:'press', session:o.id, text: e.key }); }
     });
-    sec.addEventListener('change', () => ey({ tip:'cihaz', oturum:o.id, cihaz: sec.value }));
+    sel.addEventListener('change', () => act({ type:'device', session:o.id, device: sel.value }));
     d.querySelector('.pin').addEventListener('click', async () => {
-      const n = document.getElementById('not').value;
-      const r = await ey({ tip:'isaret', oturum:o.id, not: n });
-      if (r.ok) { document.getElementById('not').value=''; not('mark queued — your AI can read it'); }
+      const n = document.getElementById('note').value;
+      const r = await act({ type:'mark', session:o.id, note: n });
+      if (r.ok) { document.getElementById('note').value=''; toast('mark queued — your AI can read it'); }
     });
     return d;
   }
 
   function vurgula() {
-    document.querySelectorAll('.tel').forEach((t) => t.classList.toggle('aktif', t.dataset.oturum === aktifOturum));
+    document.querySelectorAll('.tel').forEach((t) => t.classList.toggle('aktif', t.dataset.session === aktifOturum));
   }
 
   function panelleriGuncelle(d) {
     const kap = document.getElementById('ekranlar');
-    for (const o of d.oturumlar) {
+    for (const o of d.sessions) {
       vp[o.id] = o.viewport;
-      let pane = kap.querySelector('[data-oturum="' + o.id + '"]');
+      let pane = kap.querySelector('[data-session="' + o.id + '"]');
       if (!pane) { pane = paneOlustur(o); kap.appendChild(pane); }
-      const sec = pane.querySelector('select');
-      if (!sec.options.length && cihazListesi.length) {
-        for (const c of cihazListesi) { const op = document.createElement('option'); op.value = c.k; op.textContent = c.etiket; sec.appendChild(op); }
+      const sel = pane.querySelector('select');
+      if (!sel.options.length && deviceList.length) {
+        for (const c of deviceList) { const op = document.createElement('option'); op.value = c.k; op.textContent = c.label; sel.appendChild(op); }
       }
-      sec.value = o.cihaz;
-      pane.querySelector('header b').textContent = o.id + ' · ' + o.etiket.split('—')[0].trim();
+      sel.value = o.device;
+      pane.querySelector('header b').textContent = o.id + ' · ' + o.label.split('—')[0].trim();
     }
     vurgula();
   }
 
-  const es = new EventSource('/akis');
-  es.addEventListener('kare', (e) => {
+  const es = new EventSource('/stream');
+  es.addEventListener('frame', (e) => {
     const d = JSON.parse(e.data);
-    const img = document.querySelector('[data-oturum="' + d.oturum + '"] img');
+    const img = document.querySelector('[data-session="' + d.session + '"] img');
     if (img) img.src = 'data:image/jpeg;base64,' + d.img;
   });
-  es.addEventListener('durum', (e) => {
+  es.addEventListener('state', (e) => {
     const d = JSON.parse(e.data);
-    cihazListesi = d.cihazlar || cihazListesi;
-    // Hata sayfasinin adresi kutuya yazilmaz: kullanici fark etmeden Git/geri ile
-    // hata adresine geri donebiliyordu (17 Agu isaret testinde yasandi).
+    deviceList = d.devices || deviceList;
+    // An error page's address never lands in the box: users could otherwise walk back
+    // into the failing address with Go/Back without noticing (hit during the Aug 17 test).
     if (d.url && !d.url.startsWith('chrome-error')) document.getElementById('url').value = d.url;
-    document.getElementById('tema').value = d.tema;
+    document.getElementById('theme').value = d.theme;
     panelleriGuncelle(d);
-    if (d.hata) kayit('k', 'PAGE: ' + d.hata);
+    if (d.error) record('k', 'PAGE: ' + d.error);
   });
   es.addEventListener('log', (e) => {
     const d = JSON.parse(e.data);
-    kayit(d.tip === 'isaret' ? 'i' : (d.tip === 'konsol' ? 'u' : 'k'), '[' + d.oturum + '] ' + d.tip + ': ' + d.mesaj);
+    record(d.type === 'mark' ? 'i' : (d.type === 'console' ? 'u' : 'k'), '[' + d.session + '] ' + d.type + ': ' + d.message);
   });
 
-  function kayit(sinif, metin) {
-    const k = document.getElementById('kayit');
-    const d = document.createElement('div'); d.className = sinif; d.textContent = metin;
+  function record(className, text) {
+    const k = document.getElementById('record');
+    const d = document.createElement('div'); d.className = className; d.textContent = text;
     k.prepend(d); while (k.children.length > 80) k.lastChild.remove();
   }
 
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
 
   async function denetle() {
-    not('inspecting...');
-    const r = await ey({ tip:'denetle' });
-    if (!r.ok) { not('inspection failed'); return; }
-    const parcalar = [];
-    for (const s of r.sonuclar) {
-      const d = s.denetim || {};
-      const rz = (renk, m) => '<span class="rozet" style="background:' + renk + '">' + m + '</span>';
+    toast('inspecting...');
+    const r = await act({ type:'inspect' });
+    if (!r.ok) { toast('inspection failed'); return; }
+    const parts = [];
+    for (const s of r.results) {
+      const d = s.inspection || {};
+      const rz = (color, m) => '<span class="badges" style="background:' + color + '">' + m + '</span>';
       const p = [];
-      if (d.yatayTasma) p.push(rz('#5c2b2b','overflow'));
-      if (d.gorunmezMetin?.length) p.push(rz('#5c2b2b','invisible text ' + d.gorunmezMetin.length));
-      if (d.butonSorun?.length) p.push(rz('#5a4a1f','buttons ' + d.butonSorun.length));
-      if (d.dusukKontrast?.length) p.push(rz('#5a4a1f','contrast ' + d.dusukKontrast.length));
-      if (d.kucukHedefler?.length) p.push(rz('#5a4a1f','under 44px ' + d.kucukHedefler.length));
-      if (d.minikYazi?.length) p.push(rz('#33383e','under 12px ' + d.minikYazi.length));
+      if (d.horizontalOverflow) p.push(rz('#5c2b2b','overflow'));
+      if (d.invisibleText?.length) p.push(rz('#5c2b2b','invisible text ' + d.invisibleText.length));
+      if (d.buttonIssues?.length) p.push(rz('#5a4a1f','buttons ' + d.buttonIssues.length));
+      if (d.lowContrast?.length) p.push(rz('#5a4a1f','contrast ' + d.lowContrast.length));
+      if (d.smallTargets?.length) p.push(rz('#5a4a1f','under 44px ' + d.smallTargets.length));
+      if (d.tinyText?.length) p.push(rz('#33383e','under 12px ' + d.tinyText.length));
       if (!p.length) p.push(rz('#264d2c','clean'));
       const li = [];
       // Bulgu metinleri DENETLENEN sayfanin DOM'undan gelir → escape ZORUNLU,
-      // yoksa o sayfa panelin origin'inde script calistirabilir (stored XSS).
-      for (const x of (d.gorunmezMetin||[])) li.push('<li class="k">INVISIBLE ' + esc(x.oran) + ':1 — "' + esc(x.metin) + '"</li>');
-      for (const x of (d.butonSorun||[]).slice(0,5)) li.push('<li class="u">BUTTON "' + esc(x.metin) + '" → ' + esc(x.sorunlar.join(' · ')) + '</li>');
-      for (const x of (d.dusukKontrast||[]).slice(0,5)) li.push('<li class="u">contrast ' + esc(x.oran) + ':1 — "' + esc(x.metin) + '"</li>');
-      parcalar.push('<h4>' + esc(s.etiket || s.oturum) + '</h4>' + p.join('') + (li.length ? '<ul>' + li.join('') + '</ul>' : ''));
+      // otherwise that page could run script on the panel's origin (stored XSS).
+      for (const x of (d.invisibleText||[])) li.push('<li class="k">INVISIBLE ' + esc(x.ratio) + ':1 — "' + esc(x.text) + '"</li>');
+      for (const x of (d.buttonIssues||[]).slice(0,5)) li.push('<li class="u">BUTTON "' + esc(x.text) + '" → ' + esc(x.issues.join(' · ')) + '</li>');
+      for (const x of (d.lowContrast||[]).slice(0,5)) li.push('<li class="u">contrast ' + esc(x.ratio) + ':1 — "' + esc(x.text) + '"</li>');
+      parts.push('<h4>' + esc(s.label || s.session) + '</h4>' + p.join('') + (li.length ? '<ul>' + li.join('') + '</ul>' : ''));
     }
-    document.getElementById('bulgu').innerHTML = parcalar.join('');
-    not('done — live/inspect.json updated');
+    document.getElementById('finding').innerHTML = parts.join('');
+    toast('done — live/inspect.json updated');
   }
 </script></body></html>`;
 
 // --- Baslat ---
-sunucu.on('error', (e) => {
+server.on('error', (e) => {
   if (e.code === 'EADDRINUSE') {
     console.error(`  ! ${PORT} already in use — a panel may already be running. Try: --port 5056`);
     process.exit(2);
@@ -616,36 +617,36 @@ sunucu.on('error', (e) => {
   console.error('  ! server error:', e.message);
 });
 
-// YALNIZ loopback: host argumani verilmezse Node tum arayuzlere (0.0.0.0/::) baglar
-// ve ayni agdaki herkes tarayici oturumunu surebilirdi.
-sunucu.listen(PORT, '127.0.0.1', () => {
-  try { writeFileSync(TOKEN_DOSYA, TOKEN, { mode: 0o600 }); } catch {}
-  const adres = `http://localhost:${PORT}`;
-  console.log(`\n  Live panel : ${adres}`);
-  console.log(`  Target      : ${durum.url}  (theme: ${durum.tema})`);
-  console.log(`  AI access   : MCP tools (see_screen/inspect/marks) or ${join(CANLI_DIR, 'last-mobil.jpg')}`);
-  console.log(`  Antigravity/VS Code: Ctrl+Shift+P -> "Simple Browser: Show" -> ${adres}\n`);
-  if (!ACMA) tarayicidaAc(adres);
+// Loopback ONLY: without a host argument Node binds every interface (0.0.0.0/::) and
+// anyone on the same network could drive the browser session.
+server.listen(PORT, '127.0.0.1', () => {
+  try { writeFileSync(TOKEN_FILE, TOKEN, { mode: 0o600 }); } catch {}
+  const address = `http://localhost:${PORT}`;
+  console.log(`\n  Live panel : ${address}`);
+  console.log(`  Target      : ${state.url}  (theme: ${state.theme})`);
+  console.log(`  AI access   : MCP tools (see_screen/inspect/marks) or ${join(LIVE_DIR, 'last-mobile.jpg')}`);
+  console.log(`  Antigravity/VS Code: Ctrl+Shift+P -> "Simple Browser: Show" -> ${address}\n`);
+  if (!NO_OPEN) openInBrowser(address);
 });
 
-// Tarayici oturumlari ayri: burada patlasa bile sunucu ayakta kalir, panel hatayi gosterir.
+// Browser sessions are separate: even if this throws, the server stays up and the panel shows the error.
 try {
-  // Paralel kurulum: sirali beklemede toplam sure iki oturumun TOPLAMIYDI ve
+  // Parallel setup: waiting in sequence made the total the SUM of both sessions, and
   // MCP'nin 30sn hazir-olma butcesini asabiliyordu.
   await Promise.all([
-    TEK ? null : oturumKur('web', arg('--desktop', 'desktop'), durum.tema),
-    oturumKur('mobil', arg('--device', 'pixel'), durum.tema),
+    SINGLE ? null : openSession('web', arg('--desktop', 'desktop'), state.theme),
+    openSession('mobile', arg('--device', 'pixel'), state.theme),
   ].filter(Boolean));
 } catch (e) {
-  durum.hata = String(e).split('\n')[0].slice(0, 200);
-  console.error('  ! session setup failed:', durum.hata);
+  state.error = String(e).split('\n')[0].slice(0, 200);
+  console.error('  ! session setup failed:', state.error);
 }
 
-// Panel gun boyu acik kalir: tek bir istisna sunucuyu dusurmesin.
+// The panel stays open all day: one stray exception must not take the server down.
 process.on('unhandledRejection', (e) => console.error('  ! unhandled rejection:', String(e).split('\n')[0].slice(0, 160)));
 process.on('uncaughtException', (e) => console.error('  ! uncaught exception:', String(e).split('\n')[0].slice(0, 160)));
-sunucu.on('clientError', (e, soket) => { try { soket.destroy(); } catch {} });
+server.on('clientError', (e, soket) => { try { soket.destroy(); } catch {} });
 
 for (const sig of ['SIGINT', 'SIGTERM']) {
-  process.on(sig, async () => { try { await tarayici?.close(); } catch {} process.exit(0); });
+  process.on(sig, async () => { try { await browser?.close(); } catch {} process.exit(0); });
 }
