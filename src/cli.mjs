@@ -49,11 +49,12 @@ const DEFAULT_DEVICES = ['iphone-15', 'pixel'];
 
 // --- Arguments --------------------------------------------------------------
 function parseArgs(argv) {
-  const o = { url: null, device: DEFAULT_DEVICES, path: ['/'], theme: ['light'], full: false, live: null, settle: 1200, watch: 0, open: true };
+  const o = { url: null, device: DEFAULT_DEVICES, path: ['/'], theme: ['light'], full: false, live: null, settle: 1200, watch: 0, open: true, locale: null };
   const rest = [];
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--device' || a === '-d') o.device = argv[++i].split(',').map((s) => s.trim());
+    else if (a === '--locale') o.locale = argv[++i];
     else if (a === '--path' || a === '-p') o.path = argv[++i].split(',').map((s) => s.trim());
     else if (a === '--theme' || a === '-t') o.theme = argv[++i] === 'both' ? ['light', 'dark'] : [argv[i]];
     else if (a === '--full') o.full = true;
@@ -81,6 +82,7 @@ Options
   --full         full-page screenshots (not just the viewport)
   --wait <ms>    settle time after page load                            (default: 1200)
   --watch <s>    continuous mode: re-captures every <s> seconds, gallery auto-refreshes
+  --locale <tag> pin a browser locale, e.g. en-US (default: this machine's)
   --no-open      do not auto-open the gallery in the browser
   --live <device>  opens a real window you can browse by hand (no automation)
 
@@ -96,6 +98,23 @@ MCP server for Claude Code / Cursor / Antigravity:  uisight-mcp
 
 // --- Helpers ----------------------------------------------------------------
 const slug = (s) => (s.replace(/^\//, '').replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-|-$/g, '') || 'home');
+
+/**
+ * npm installs the Playwright package but not the browsers it drives, so the very
+ * first `npx uisight` on a clean machine used to die on a raw Playwright stack
+ * trace. That is the worst possible first impression: it reads like the tool is
+ * broken, and there is nothing in it telling you what to run.
+ */
+export function missingBrowser(e, engine) {
+  const s = String(e);
+  if (!/Executable doesn't exist|playwright install|browserType\.launch/i.test(s)) return e;
+  return new Error(
+    `${engine} is not installed yet.\n\n` +
+    `  npx playwright install ${engine}\n\n` +
+    `Playwright ships the driver over npm but downloads browsers separately (~150 MB, once).\n` +
+    `For real iOS Safari on iPhone profiles, add webkit: npx playwright install chromium webkit`
+  );
+}
 
 export function deviceSettings(pwName) {
   const d = devices[pwName];
@@ -306,7 +325,7 @@ export const INSPECTION_SCRIPT = (settings) => {
   result.lowContrast = result.lowContrast.slice(0, 12);
   result.buttonIssues = result.buttonIssues.slice(0, 12);
 
-  // 1) Yatay tasma — mobilde en sik bug.
+  // 1) Horizontal overflow — the most common mobile bug there is.
   const docWidth = document.documentElement.scrollWidth;
   const visibleWidth = window.innerWidth;
   if (docWidth > visibleWidth + 2) {
@@ -359,7 +378,7 @@ export const INSPECTION_SCRIPT = (settings) => {
   return result;
 };
 
-// --- Canli mod --------------------------------------------------------------
+// --- Live mode ---------------------------------------------------------------
 async function canliAc(url, cihazAnahtar) {
   const p = PROFILES[cihazAnahtar];
   if (!p) throw new Error(`Bilinmeyen device: ${cihazAnahtar}`);
@@ -374,7 +393,7 @@ async function canliAc(url, cihazAnahtar) {
   await browser.close();
 }
 
-// --- Ana akis ---------------------------------------------------------------
+// --- Main flow ---------------------------------------------------------------
 async function main() {
   const o = parseArgs(process.argv.slice(2));
   if (o.printHelp || !o.url) { printHelp(); process.exit(o.url ? 0 : 1); }
@@ -405,7 +424,7 @@ async function tur(o) {
 
   for (const key of o.device) {
     const p = PROFILES[key];
-    if (!p) { console.log(`  ! bilinmeyen device atlandi: ${key}`); continue; }
+    if (!p) { console.log(`  ! unknown device skipped: ${key} (known: ${Object.keys(PROFILES).join(', ')})`); continue; }
 
     // If WebKit will not launch on this machine (the missing-DLL case on Windows), fall back to Chromium;
     // layout/color checks keep running; the report states the engine plainly.
@@ -414,17 +433,22 @@ async function tur(o) {
       try {
         engineCache[engineUsed] = await (engineUsed === 'webkit' ? webkit : chromium).launch();
       } catch (e) {
-        if (engineUsed !== 'webkit') throw e;
-        console.log(`  ! webkit acilmadi (${String(e).split('\n')[0].slice(0, 60)}) -> chromium'a dusuluyor`);
+        if (engineUsed !== 'webkit') throw missingBrowser(e, 'chromium');
+        console.log(`  ! webkit would not launch (${String(e).split('\n')[0].slice(0, 60)}) -> falling back to chromium`);
         engineUsed = 'chromium-fallback';
-        if (!engineCache[engineUsed]) engineCache[engineUsed] = await chromium.launch();
+        try {
+          if (!engineCache[engineUsed]) engineCache[engineUsed] = await chromium.launch();
+        } catch (e2) { throw missingBrowser(e2, 'chromium'); }
       }
     }
     const browser = engineCache[engineUsed];
     const engineName = engineUsed === 'chromium-fallback' ? 'chromium (no webkit — iOS-specific bugs WILL be missed)' : engineUsed;
 
     for (const theme of o.theme) {
-      const ctx = await browser.newContext({ ...deviceSettings(p.pw), colorScheme: theme, locale: 'tr-TR' });
+      // No locale is forced: the page renders the way this machine would render it.
+      // A hard-coded locale used to ship here, so every user in the world audited
+      // their app in Turkish — language switchers and date formats included.
+      const ctx = await browser.newContext({ ...deviceSettings(p.pw), colorScheme: theme, ...(o.locale ? { locale: o.locale } : {}) });
       const page = await ctx.newPage();
 
       for (const path of o.path) {
@@ -470,7 +494,7 @@ async function tur(o) {
   const lines = [];
   lines.push(`# uisight report — ${o.url}`);
   lines.push('');
-  lines.push(`- Date: ${new Date().toLocaleString('tr-TR')}`);
+  lines.push(`- Date: ${new Date().toISOString().replace('T', ' ').slice(0, 19)} UTC`);
   lines.push(`- Devices: ${o.device.join(', ')} | Themes: ${o.theme.join(', ')} | Paths: ${o.path.join(', ')}`);
   lines.push(`- Output: ${outDir}`);
   lines.push('');
@@ -658,7 +682,7 @@ ${o.watch ? `<meta http-equiv="refresh" content="${o.watch}">` : ''}
 <div class="ust">
   <h1>uisight</h1>
   <a href="${esc(o.url)}" target="_blank">${esc(o.url)}</a>
-  <span class="info">${new Date().toLocaleString('en-US')} · ${records.length} previews</span>
+  <span class="info">${new Date().toISOString().replace('T', ' ').slice(0, 16)} UTC · ${records.length} previews</span>
   ${o.watch ? `<span class="live">LIVE — refreshes every ${o.watch}s</span>` : ''}
   <span class="info">Spot a problem? Tell your AI the <b>card number</b> (e.g. "the header collides on card 3").</span>
 </div>

@@ -58,6 +58,9 @@ Scope note: uisight is for **web and responsive UIs**. For native iOS/Android ap
 ## Quickstart
 
 ```bash
+# once per machine: Playwright ships over npm but downloads browsers separately
+npx playwright install chromium webkit   # ~300 MB; chromium alone is enough to start
+
 # one-shot audit: PNGs + gallery + report for iPhone/Pixel/desktop, light+dark
 npx uisight https://yourapp.com --theme both
 

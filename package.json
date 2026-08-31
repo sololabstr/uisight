@@ -1,6 +1,6 @@
 {
   "name": "uisight",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "mcpName": "io.github.yusufcemres/uisight",
   "description": "Your AI can already see the screen — it just can't measure it. uisight is an MCP server for web/responsive UIs: live mobile+desktop sessions, a measurement engine (contrast, touch targets, theme drift) that reports findings as text, and a panel you and your agent share.",
   "type": "module",

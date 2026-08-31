@@ -3,19 +3,18 @@
  * uisight — LIVE PANEL (multi-session, synchronised).
  *
  * Web + mobile side by side at the same time: each session gets its own Playwright
- * context and streams live over CDP screencast. You click and type in the panel ->
- * ilgili oturuma gider. Adres cubugu TUM oturumlara gider (URL-senkron).
- * AI ayni oturumlari MCP uzerinden gorur/olcer/eller (mcp.mjs).
+ * context and streams live over CDP screencast. You click and type in the panel and
+ * it lands in that session. The address bar drives EVERY session at once. The AI sees,
+ * measures and drives those same sessions over MCP (mcp.mjs).
  *
- * Kullanim:
- *   node server.mjs http://localhost:3000                  # web(masaustu) + mobile(pixel)
- *   node server.mjs <url> --device iphone-se --web laptop   # profillleri sel
+ * Usage:
+ *   node server.mjs http://localhost:3000                  # web (desktop) + mobile (pixel)
+ *   node server.mjs <url> --device iphone-se --web laptop  # pick the profiles
  *   node server.mjs <url> --single                         # mobile session only
  *   UISIGHT_FALLBACK=1 node server.mjs <url>               # fallback stream instead of screencast (testing)
  *
  * Human -> AI channel: the panel's "Mark" button queues a note + the current frame
- * under live/marks/;
- * AI bunlari MCP `marks` araciyla okur.
+ * under live/marks/, and the AI reads them with the MCP `marks` tool.
  */
 
 import { createServer } from 'node:http';
@@ -26,7 +25,7 @@ import { fileURLToPath } from 'node:url';
 import { exec } from 'node:child_process';
 import { homedir, platform } from 'node:os';
 import { randomUUID } from 'node:crypto';
-import { PROFILES, deviceSettings, INSPECTION_SCRIPT } from './cli.mjs';
+import { PROFILES, deviceSettings, INSPECTION_SCRIPT, missingBrowser } from './cli.mjs';
 
 
 // Live artifacts live under the user's home — never inside the package (npx → node_modules).
@@ -35,10 +34,10 @@ const MARKS_DIR = join(LIVE_DIR, 'marks');
 const READ_DIR = join(MARKS_DIR, 'read');
 for (const d of [LIVE_DIR, MARKS_DIR, READ_DIR]) mkdirSync(d, { recursive: true });
 
-// --- Argumanlar ---
+// --- Arguments ---
 const argv = process.argv.slice(2);
 const arg = (ad, vars) => { const i = argv.indexOf(ad); return i >= 0 && argv[i + 1] ? argv[i + 1] : vars; };
-const FLAGS_WITH_VALUE = new Set(['--device', '--desktop', '--theme', '--port']);
+const FLAGS_WITH_VALUE = new Set(['--device', '--desktop', '--theme', '--port', '--locale']);
 let targetUrl = null;
 for (let i = 0; i < argv.length; i++) {
   const a = argv[i];
@@ -53,13 +52,14 @@ const PORT = Number(process.env.UISIGHT_PORT || process.env.MOBILQA_PORT || arg(
 const NO_OPEN = argv.includes('--no-open');
 const SINGLE = argv.includes('--single');
 const FORCE_FALLBACK = (process.env.UISIGHT_FALLBACK || process.env.MOBILQA_YEDEK) === '1';
+const LOCALE = process.env.UISIGHT_LOCALE || arg('--locale', null);
 
 // --- Security: this tool is a local server that DRIVES a browser session. Two layers:
 //   (1) bind to loopback only (cuts off LAN access) — see listen() below.
 //   (2) Host allowlist (DNS-rebinding guard, ALL endpoints) + an action token (CSRF guard, mutating endpoints).
 // The panel sends the token in a header when it fetches its own origin; a malicious
-// tab (POSTing to localhost from the same machine) cannot know it, and the text/plain form trick
-// custom header EKLEYEMEZ → reddedilir.
+// tab (POSTing to localhost from the same machine) cannot know it, and the text/plain
+// form trick cannot add a custom header, so it is refused.
 const TOKEN = randomUUID();
 // Write the token to a per-port local file: the MCP server (a separate process on the
 // same machine) reads it and sends it in a header. A cross-site page CANNOT read this file.
@@ -82,7 +82,7 @@ function hostAllowed(req) {
     && (port === '' || port === String(PORT));
 }
 
-// --- Genel state ---
+// --- Shared state ---
 const state = {
   url: targetUrl,
   theme: arg('--theme', 'light'),
@@ -95,7 +95,7 @@ const sessions = new Map();
 let browser = null;
 const clients = new Set(); // SSE
 
-// --- Yardimcilar ---
+// --- Helpers ---
 function broadcast(event, data) {
   const packet = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
   for (const r of clients) { try { r.write(packet); } catch { clients.delete(r); } }
@@ -133,17 +133,21 @@ async function openSession(id, deviceKey, theme) {
 
   const profile = PROFILES[deviceKey] || PROFILES[id === 'web' ? 'desktop' : 'pixel'];
   const settings = deviceSettings(profile.pw);
-  if (!browser) browser = await chromium.launch();
+  if (!browser) {
+    try { browser = await chromium.launch(); }
+    catch (e) { throw missingBrowser(e, 'chromium'); }
+  }
 
-  const ctx = await browser.newContext({ ...settings, colorScheme: theme, locale: 'tr-TR' });
+  // No locale is forced — see the same note in cli.mjs. --locale pins one.
+  const ctx = await browser.newContext({ ...settings, colorScheme: theme, ...(LOCALE ? { locale: LOCALE } : {}) });
   const page = await ctx.newPage();
   const o = {
     id, deviceKey, profile, ctx, page, cdp: null, fallbackTimer: null,
     viewport: settings.viewport, lastFrame: null, lastWrite: 0,
   };
-  // Register in the map only AFTER the first goto completes: otherwise the setup goto and an
-  // gelen `git` eylemi ayni sayfada yarisirsa Chromium gec kalan navigasyonu
-  // chrome-error olarak commit edebiliyor (17 Agu MCP live testinde yasandi).
+  // Register in the map only AFTER the first goto completes: when the setup goto races
+  // an incoming `goto` action on the same page, Chromium can commit the late navigation
+  // as chrome-error (hit during the Aug 17 MCP live test).
 
   page.on('pageerror', (e) => addRecord(id, 'js-error', e));
   page.on('console', (m) => { if (m.type() === 'error') addRecord(id, 'console', m.text()); });
@@ -160,7 +164,7 @@ async function openSession(id, deviceKey, theme) {
     addRecord(id, 'page', state.error);
   }
 
-  sessions.set(id, o); // page oturdu — artik eylemlere acik
+  sessions.set(id, o); // the page has settled — actions may reach it now
   await startStream(o);
   broadcast('state', publicState());
   return o;
@@ -284,7 +288,7 @@ async function applyAction(g) {
       const targets = g.session ? [sessions.get(g.session)].filter(Boolean) : [...sessions.values()];
       for (const o of targets) {
         try {
-          // Timeout: target sayfada engelleyici bir native dialog varsa evaluate suresiz asili kalirdi.
+          // Timeout: a blocking native dialog on the target page would otherwise leave evaluate hanging forever.
           o.page.setDefaultTimeout(20000);
           const d = await o.page.evaluate(INSPECTION_SCRIPT, { mobile: o.profile.mobile !== false });
           results.push({ session: o.id, device: o.deviceKey, label: o.profile.label, theme: state.theme, url: state.url, inspection: d });
@@ -596,7 +600,7 @@ const PANEL_HTML_SABLON = `<!doctype html><html lang="en"><head><meta charset="u
       if (d.tinyText?.length) p.push(rz('#33383e','under 12px ' + d.tinyText.length));
       if (!p.length) p.push(rz('#264d2c','clean'));
       const li = [];
-      // Bulgu metinleri DENETLENEN sayfanin DOM'undan gelir → escape ZORUNLU,
+      // Finding text comes from the INSPECTED page's DOM, so escaping is mandatory:
       // otherwise that page could run script on the panel's origin (stored XSS).
       for (const x of (d.invisibleText||[])) li.push('<li class="k">INVISIBLE ' + esc(x.ratio) + ':1 — "' + esc(x.text) + '"</li>');
       for (const x of (d.buttonIssues||[]).slice(0,5)) li.push('<li class="u">BUTTON "' + esc(x.text) + '" → ' + esc(x.issues.join(' · ')) + '</li>');
@@ -631,8 +635,8 @@ server.listen(PORT, '127.0.0.1', () => {
 
 // Browser sessions are separate: even if this throws, the server stays up and the panel shows the error.
 try {
-  // Parallel setup: waiting in sequence made the total the SUM of both sessions, and
-  // MCP'nin 30sn hazir-olma butcesini asabiliyordu.
+  // Parallel setup: waiting in sequence made the total the SUM of both sessions, which
+  // could blow past the MCP client's 30s readiness budget.
   await Promise.all([
     SINGLE ? null : openSession('web', arg('--desktop', 'desktop'), state.theme),
     openSession('mobile', arg('--device', 'pixel'), state.theme),

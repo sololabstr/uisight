@@ -89,3 +89,27 @@ test('every tool describes itself and its arguments', async () => {
     }
   }
 });
+
+/**
+ * Cold-start guidance.
+ *
+ * npm installs Playwright's driver but not the browsers it drives, so the very first
+ * `npx uisight` on a clean machine hit a raw Playwright stack trace. 99 people cloned
+ * this repo and filed zero issues — a first run that looks broken is the likeliest
+ * reason someone leaves without saying anything.
+ */
+test('a missing browser is explained, and other errors pass through untouched', async () => {
+  const { missingBrowser } = await import('../src/cli.mjs');
+
+  const playwrightSays = new Error(
+    "browserType.launch: Executable doesn't exist at /ms-playwright/chromium-1200/chrome\n" +
+    'Please run the following command to download new browsers:\n    npx playwright install'
+  );
+  const explained = missingBrowser(playwrightSays, 'chromium');
+  assert.notEqual(explained, playwrightSays, 'the raw Playwright error must not reach the user');
+  assert.match(explained.message, /npx playwright install chromium/, 'it must name the exact command to run');
+
+  // Swallowing unrelated failures would be worse than the original problem.
+  const unrelated = new Error('net::ERR_CONNECTION_REFUSED at http://localhost:3000');
+  assert.equal(missingBrowser(unrelated, 'chromium'), unrelated, 'unrelated errors must pass through unchanged');
+});

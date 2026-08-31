@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.2.1 — 2026-08-31
+
+Three cold-start defects, all of them things a first-time user would hit and none of
+them things an existing user would report:
+
+- **A missing browser now tells you what to run.** npm installs Playwright's driver but
+  not the browsers it drives, so the first `npx uisight` on a clean machine died on a raw
+  Playwright stack trace. It now says `npx playwright install chromium` and explains why.
+  The README says it too, as step one.
+- **No locale is forced any more.** `locale: 'tr-TR'` was hard-coded in both the CLI and
+  the panel, so every user in the world audited their app in Turkish — language switchers,
+  date formats and all. The page now renders the way your machine would render it, and
+  `--locale en-US` (or `UISIGHT_LOCALE`) pins one when you want a fixed baseline.
+- **Report timestamps are locale-neutral** (ISO + UTC) instead of Turkish-formatted.
+
+Two leftover Turkish strings in CLI output are gone, and the missing-browser path is
+covered by a test.
+
 ## 0.2.0 — 2026-08-30
 
 **Breaking.** The internals were written in Turkish (this started as a personal tool). Everything
