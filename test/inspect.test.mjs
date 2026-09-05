@@ -806,3 +806,33 @@ test('the theme signature records colours in one spelling, not the browser\'s', 
     }
   }
 });
+
+test('an icon font\'s ligature name is not the button\'s label', async () => {
+  // Icon fonts put the icon's NAME in the text node and draw a glyph over it,
+  // so innerText reads what nobody sees. Two apps in one round reported labels
+  // like "add Şarkı" and "Operatör girişi arrow_fo" — half the label spent on
+  // something invisible. For an icon-only control there is nothing left to
+  // read, so the accessible name is the answer, and it is the better one.
+  const d = await inspect(`
+    <div style="padding:0">
+      <button style="height:30px">
+        <span class="material-symbols-outlined">add</span> Şarkı
+      </button>
+      <button style="height:30px" aria-label="Tema değiştir">
+        <span class="material-symbols-outlined">light_mode</span>
+      </button>
+      <button style="height:30px">
+        <i style="font-family:'Font Awesome 6 Free'">play_arrow</i> satır
+      </button>
+      <select style="height:30px"><option>A1</option><option>A2</option></select>
+    </div>`);
+  const etiketler = (d.smallTargets || []).map((x) => x.text);
+  assert.ok(etiketler.length >= 3, `expected the short controls, got ${JSON.stringify(etiketler)}`);
+  assert.ok(etiketler.includes('Şarkı'), `ligature not dropped: ${JSON.stringify(etiketler)}`);
+  assert.ok(etiketler.includes('Tema değiştir'), `icon-only button should fall back to its accessible name: ${JSON.stringify(etiketler)}`);
+  assert.ok(etiketler.includes('satır'), `font-family detection missed it: ${JSON.stringify(etiketler)}`);
+  for (const e of etiketler) {
+    assert.doesNotMatch(e, /add|light_mode|play_arrow/, `an icon name survived: ${e}`);
+    assert.doesNotMatch(e, /\n/, `a label must be one line: ${JSON.stringify(e)}`);
+  }
+});

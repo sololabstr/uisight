@@ -396,7 +396,45 @@ export const INSPECTION_SCRIPT = (settings) => {
     const className = (typeof el.className === 'string' ? el.className : '').trim().split(/\s+/).slice(0, 2).join('.');
     return `${el.tagName.toLowerCase()}${className ? '.' + className : ''}`;
   };
-  const shortLabel = (el) => (el.innerText || el.value || el.getAttribute('aria-label') || '').trim().replace(/\s+/g, ' ').slice(0, 45);
+  /**
+   * Is this element an icon rendered as a ligature?
+   *
+   * Icon fonts put the icon's NAME in the text node -- `play_arrow`,
+   * `arrow_forward`, `inventory_2` -- and the font draws a glyph over it. So
+   * innerText reads what nobody sees. Two different apps reported labels like
+   * "play_arrow satir" and "Operator girisi arrow_fo", where the second half is
+   * the icon and the report has spent its 45 characters on it.
+   */
+  const IKON_FONT = /material ?symbols|material ?icons|font ?awesome|icomoon|glyphicons?|bootstrap-icons|remixicon|lucide|feather/i;
+  const ikonMu = (el) => {
+    if (!el || el.nodeType !== 1) return false;
+    const sinif = typeof el.className === 'string' ? el.className : '';
+    if (/\b(material-symbols|material-icons)/.test(sinif) || /(^|\s)fa[bsrl]?(\s|$)|(^|\s)fa-/.test(sinif)) return true;
+    return IKON_FONT.test(getComputedStyle(el).fontFamily || '');
+  };
+  /** The text a person actually reads, with ligature icon names left out. */
+  const shortLabel = (el) => {
+    let ham = '';
+    if (el.tagName === 'INPUT' || el.tagName === 'SELECT' || el.tagName === 'TEXTAREA') ham = el.value || '';
+    if (!ham) {
+      // Walk instead of taking innerText, so an icon child can be dropped
+      // without losing the words around it.
+      const parcalar = [];
+      const gez = (n) => {
+        for (const c of n.childNodes) {
+          if (c.nodeType === 3) { const s = c.textContent.trim(); if (s) parcalar.push(s); continue; }
+          if (c.nodeType !== 1) continue;
+          if (ikonMu(c)) continue;
+          gez(c);
+        }
+      };
+      if (ikonMu(el)) return (el.getAttribute('aria-label') || '').trim().slice(0, 45);
+      gez(el);
+      ham = parcalar.join(' ');
+    }
+    if (!ham) ham = el.getAttribute('aria-label') || '';
+    return ham.trim().replace(/\s+/g, ' ').slice(0, 45);
+  };
 
   // --- 5) Color check: invisible text + low contrast ---
   // This catches the "I switched themes and the text vanished" case (the NFC lesson).
@@ -414,7 +452,10 @@ export const INSPECTION_SCRIPT = (settings) => {
     if (!hasOwnText && el.tagName !== 'INPUT') continue;
 
     // Icon fonts: the content is a ligature name ("restaurant"), not real copy — the text-contrast rule does not apply.
-    if (/material symbols|material icons|font ?awesome|icomoon|glyphicon|bootstrap-icons|remixicon|lucide|feather/i.test(getComputedStyle(el).fontFamily || '')) continue;
+    // Through ikonMu, not a second copy of the list: this one knew about lucide
+    // and feather while the label side knew about class names, so each missed
+    // what the other caught.
+    if (ikonMu(el)) continue;
 
     // Emoji paint themselves. The element's `color` says nothing about how a
     // ⚖️ or ✅ actually looks, so measuring it produces a contrast number for a
@@ -581,14 +622,18 @@ export const INSPECTION_SCRIPT = (settings) => {
   if (isMobile) document.querySelectorAll('a, button, [role="button"], input, select, textarea').forEach((el) => {
     const r = el.getBoundingClientRect();
     if (r.width === 0 || r.height === 0) return;
-    const metinVar = !!(el.innerText || el.value || '').trim();
+    // Through shortLabel, not a copy of it: this line used to build the label
+    // itself, so it kept the newlines out of a <select> and the ligature names
+    // out of an icon button while the rest of the report had them stripped.
+    const etiket = shortLabel(el);
+    const metinVar = !!etiket;
     const dar = !metinVar && r.width < 43.5;
     const kisa = r.height < 43.5;
     if (dar || kisa) {
       if (dekoratif(el)) return;
       result.smallTargets.push({
         label: el.tagName.toLowerCase(),
-        text: (el.innerText || el.value || el.getAttribute('aria-label') || '').trim().slice(0, 40),
+        text: etiket.slice(0, 40),
         size: `${Math.round(r.width)}x${Math.round(r.height)}`,
       });
     }
