@@ -326,3 +326,20 @@ test('the bar takes its colours from the editor, not from a palette we picked', 
     }
   }
 });
+
+test('the switcher does not reuse a glyph the panel already binds to something else', () => {
+  // The rescan button was ⟳, sitting a few pixels above the panel's own ⟳,
+  // which reloads the page. Two identical controls, different actions — the
+  // exact thing this tool flags on other people's UIs. Pressing "rescan"
+  // reloaded the site instead, and the report from the user was simply that
+  // the button "reopens noben".
+  const panelGlifleri = new Set(
+    [...server.matchAll(/<button onclick="act\([^"]*\)">([^<]{1,3})<\/button>/g)].map((m) => m[1].trim()),
+  );
+  assert.ok(panelGlifleri.size >= 3, `expected the panel toolbar glyphs, found ${[...panelGlifleri]}`);
+  const cubuk = /<div class="sw">([\s\S]*?)<\/div>/.exec(ext)?.[1] || '';
+  assert.ok(cubuk, 'the switcher bar markup must be findable');
+  for (const g of panelGlifleri) {
+    assert.ok(!cubuk.includes(`>${g}<`), `the switcher reuses the panel's "${g}"`);
+  }
+});

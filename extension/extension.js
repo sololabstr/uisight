@@ -230,7 +230,7 @@ function gomuluHtml(p, dar, paneller = []) {
   const cubuk = hepsi.length > 1 ? `
   <div class="sw">
     <select id="sec" title="Which running panel to show">${secenekler}</select>
-    <button id="yenile" title="Rescan for running panels">⟳</button>
+    <button id="yenile" title="Look again for panels that started since this opened">Scan</button>
   </div>` : '';
 
   return `<!doctype html><html><head><meta charset="utf-8">
