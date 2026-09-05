@@ -432,20 +432,20 @@ export const INSPECTION_SCRIPT = (settings) => {
     let ham = '';
     if (el.tagName === 'INPUT' || el.tagName === 'SELECT' || el.tagName === 'TEXTAREA') ham = el.value || '';
     if (!ham) {
-      // Walk instead of taking innerText, so an icon child can be dropped
-      // without losing the words around it.
-      const parcalar = [];
-      const gez = (n) => {
-        for (const c of n.childNodes) {
-          if (c.nodeType === 3) { const s = c.textContent.trim(); if (s) parcalar.push(s); continue; }
-          if (c.nodeType !== 1) continue;
-          if (ikonMu(c)) continue;
-          gez(c);
-        }
-      };
       if (ikonMu(el)) return (el.getAttribute('aria-label') || '').trim().slice(0, 45);
-      gez(el);
-      ham = parcalar.join(' ');
+      // innerText, not a walk of the text nodes. Joining the pieces myself put
+      // spaces where the layout had none: a rating rendered "4.8 (4)" came back
+      // as "4.8 ( 4 )", because the parentheses are their own nodes. innerText
+      // already knows how the line reads; the only thing wrong with it is that
+      // it includes ligature icon names, so those are cut out of it afterwards.
+      ham = el.innerText || '';
+      for (const c of el.querySelectorAll('*')) {
+        if (!ikonMu(c)) continue;
+        const ad = (c.textContent || '').trim();
+        // Bounded by whitespace or by the ends, so an icon called `add` cannot
+        // take a bite out of the word "address".
+        if (ad) ham = ham.split(/\s+/).filter((p) => p !== ad).join(' ');
+      }
     }
     if (!ham) ham = el.getAttribute('aria-label') || '';
     return ham.trim().replace(/\s+/g, ' ').slice(0, 45);
@@ -656,9 +656,13 @@ export const INSPECTION_SCRIPT = (settings) => {
 
   // 3) Text under 12px — unreadable on a phone.
   document.querySelectorAll('p, span, li, a, button, label, td').forEach((el) => {
-    if (!el.innerText || !el.innerText.trim()) return;
+    // The fourth place that built its own label. Through shortLabel it collapses
+    // whitespace -- a star rating came back with a newline inside it -- and it
+    // stops counting an icon glyph as unreadable text, which it never was.
+    const metin = shortLabel(el);
+    if (!metin) return;
     const fs = parseFloat(getComputedStyle(el).fontSize);
-    if (fs && fs < 12) result.tinyText.push({ fontSize: `${fs}px`, text: el.innerText.trim().slice(0, 40) });
+    if (fs && fs < 12) result.tinyText.push({ fontSize: `${fs}px`, text: metin.slice(0, 40) });
   });
 
   // 4) Images without alt text.
@@ -833,6 +837,10 @@ export const INSPECTION_SCRIPT = (settings) => {
     // 14 live sites, 17 of 18 "clipped" findings were line-clamped card text.
     const clamp = st.webkitLineClamp || st.lineClamp;
     if (clamp && clamp !== 'none') return;
+    // Decoration is allowed to be cut off. A giant watermark word bled past the
+    // footer on a real site and came back as a defect; it is aria-hidden and
+    // pointer-events:none, which is the page saying so out loud.
+    if (dekoratif(el)) return;
     result.clippedText.push({
       sel: describe(el), text: t.slice(0, 40), axis: cutV ? 'vertical' : 'horizontal',
       hiddenPx: cutV ? el.scrollHeight - el.clientHeight : el.scrollWidth - el.clientWidth,

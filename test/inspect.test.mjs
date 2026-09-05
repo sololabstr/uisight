@@ -896,3 +896,38 @@ test('the landscape and foldable profiles are the sizes Android now forces', asy
       `${k} label says ${sayi[1]}px but the viewport is ${v.width}x${v.height}`);
   }
 });
+
+test('a label keeps the spacing the layout gave it', async () => {
+  // Dropping icons by walking the text nodes and joining them myself put spaces
+  // where the line had none: a rating that reads "4.8 (4)" came back as
+  // "4.8 ( 4 )", because the parentheses are their own nodes. innerText already
+  // knows how a line reads — the icons are cut out of it afterwards instead.
+  const d = await inspect(`
+    <div>
+      <span style="font-size:10px">4.8 <b>(</b>4<b>)</b></span>
+      <button style="height:30px">
+        <i class="material-symbols-outlined">add</i> Adres ekle
+      </button>
+      <span style="font-size:10px">1.200 ₺ · Antalya</span>
+    </div>`);
+  const kucuk = (d.tinyText || []).map((x) => x.text);
+  assert.ok(kucuk.includes('4.8 (4)'), `spacing was rewritten: ${JSON.stringify(kucuk)}`);
+  assert.ok(kucuk.includes('1.200 ₺ · Antalya'), `punctuation must survive: ${JSON.stringify(kucuk)}`);
+
+  // And the icon still comes out — without eating the word that contains it.
+  const etiket = (d.smallTargets || []).map((x) => x.text);
+  assert.ok(etiket.includes('Adres ekle'),
+    `"add" is the icon, "Adres" is not: ${JSON.stringify(etiket)}`);
+});
+
+test('decoration is allowed to be cut off', async () => {
+  // A giant watermark word bleeding past the footer came back as a defect on a
+  // real site. It is pointer-events:none, which is the page saying so.
+  const KUTU = 'width:120px;height:24px;overflow:hidden;font-size:40px;white-space:nowrap';
+  const d = await inspect(`
+    <div style="${KUTU}">KOKART kesilen gercek metin</div>
+    <div style="${KUTU};pointer-events:none" aria-hidden="true">KOKART filigran</div>`);
+  const kesikler = (d.clippedText || []).map((x) => x.text);
+  assert.equal(kesikler.length, 1, `only the real one: ${JSON.stringify(kesikler)}`);
+  assert.match(kesikler[0], /gercek/);
+});
