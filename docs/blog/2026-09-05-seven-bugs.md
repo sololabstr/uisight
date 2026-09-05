@@ -101,6 +101,14 @@ Tool schemas are the other fixed cost: they go out with every request whether th
 
 ---
 
-The tool is [uisight](https://github.com/sololabstr/uisight) — MIT, runs entirely locally, no account, nothing leaves your machine. It is a CLI, a live panel you and your agent watch together, and an MCP server so the agent can read measurements as text instead of guessing from pixels.
+The tool is [uisight](https://github.com/sololabstr/uisight) — MIT, runs entirely locally, no account, nothing leaves your machine.
+
+It comes in three shapes, and they are the same engine:
+
+- **An editor extension.** The panel in the screenshots lives in your side bar — [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=sololabstr.uisight), or [Open VSX](https://open-vsx.org/extension/sololabstr/uisight) for Cursor, Windsurf, Antigravity and VSCodium.
+- **An MCP server**, so your agent reads measurements as text instead of guessing from pixels:
+  `claude mcp add --scope user uisight -- npx -y -p uisight@latest uisight-mcp`
+- **A CLI**, for the one-shot audit that produced the gallery above:
+  `npx uisight https://yourapp.com --theme both`
 
 If you try it and a check fires when it should have stayed quiet, that is the report I want most. A tool that cries wolf on every bottom navigation bar gets ignored — and then its real findings go unread too.
