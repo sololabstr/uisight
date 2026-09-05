@@ -1,5 +1,45 @@
 # Changelog
 
+## 0.30.0 — 2026-09-05
+
+A second field round: three sites it had never seen, seven defects, all its own.
+
+**The report could not count.** The summary line read "Records with automated
+findings: 8/4" — more screens with findings than screens. The counter
+incremented once per finding TYPE while its label said records. Underneath it
+was the worse one: a second, hand-maintained list decided whether to print
+"automated checks clean", and it had fallen behind the checks, so a screen could
+carry a finding and be called clean directly under it. Console and network
+errors were not in that list at all. Both now come from one flag set by every
+branch that prints something.
+
+**`--desktop desktop` was swallowed.** It is a real flag — of uisight-panel —
+so the run quietly produced two phones, no desktop, and a report that did not
+mention the omission. Unknown flags exit 2 now, and a panel-only one is named
+as such.
+
+**One colour, two spellings.** The theme section still printed raw
+`oklab(0.999994 0.0000455677 0.0000200868 / 0.8)` — the same white that another
+device wrote as `oklab(1 0 0 / 0.8)`. Forty-six characters of noise per row, in
+a section that lists two dozen, and that signature is compared string against
+string to decide whether a colour survived the theme switch. It reads
+`#ffffff 80%` now, and the transparent-background test moved with the format
+rather than silently going blind.
+
+**An icon's name is not the button's label.** Two of the three apps reported
+things like "add Şarkı" and "Operatör girişi arrow_fo": icon fonts put the
+icon's name in the text node and draw a glyph over it, so innerText reads what
+nobody sees. Labels skip icon elements now, keeping the words around them, and
+an icon-only control falls back to its accessible name — a theme toggle reports
+"Tema değiştir" instead of "light_mode".
+
+Two duplications surfaced with that last one, both the same shape as the "clean"
+bug: the touch-target check built its own label instead of calling the one that
+exists, which is why a `<select>` came back with newlines in it; and the
+contrast rule had its own icon-font list — a longer one, with lucide and feather
+— while the label side had the class names, so each missed what the other
+caught.
+
 ## 0.29.0 — 2026-09-05
 
 The side bar shows both screens again.
