@@ -836,3 +836,63 @@ test('an icon font\'s ligature name is not the button\'s label', async () => {
     assert.doesNotMatch(e, /\n/, `a label must be one line: ${JSON.stringify(e)}`);
   }
 });
+
+test('an installable page is warned about the Android system bars; an ordinary site is not', async () => {
+  // Android does not work like iOS. Edge-to-edge is not opted into by the page:
+  // from targetSdk 35 the system draws the app under the status bar and the
+  // gesture handle regardless. So the gate cannot be a viewport flag — it is
+  // whether this page can BECOME an app, which is what the manifest says.
+  const CUBUK = `
+    <nav style="position:fixed;bottom:0;left:0;right:0;height:56px;background:#eee">
+      <button style="height:48px;width:120px">Kaydet</button>
+    </nav>
+    <p style="margin-top:900px">content</p>`;
+
+  const kurulabilir = await inspect(`<link rel="manifest" href="/manifest.json">${CUBUK}`);
+  assert.ok(kurulabilir.unsafeArea?.length, 'a page with a manifest can be packaged, so the bars apply');
+  assert.match(kurulabilir.unsafeArea[0].note, /targetSdk 35|system bars/,
+    `the reason must name the Android rule, got: ${kurulabilir.unsafeArea[0].note}`);
+  assert.equal(kurulabilir.unsafeArea[0].edge, 'bottom');
+
+  // An ordinary website sits below the browser's own chrome and never meets a
+  // system bar. Firing here would be the false alarm that gets a check ignored.
+  const siradan = await inspect(CUBUK);
+  assert.deepEqual(siradan.unsafeArea, [], 'a plain page is not an app and must stay quiet');
+
+  // And the iOS gate still says its own thing, not the Android one.
+  const ios = await inspect(`<meta name="viewport" content="width=device-width,viewport-fit=cover">${CUBUK}`);
+  assert.ok(ios.unsafeArea?.length, 'viewport-fit=cover is still a gate on its own');
+  assert.match(ios.unsafeArea[0].note, /viewport-fit=cover/);
+
+  // Using the inset is the fix, and using it must silence the finding.
+  const duzeltilmis = await inspect(
+    `<link rel="manifest" href="/manifest.json">
+     <style>nav{padding-bottom:env(safe-area-inset-bottom)}</style>${CUBUK}`);
+  assert.deepEqual(duzeltilmis.unsafeArea, [], 'a page that handles the inset has nothing to report');
+});
+
+test('the landscape and foldable profiles are the sizes Android now forces', async () => {
+  // Android 16 ignores an app's orientation and resizability restrictions on any
+  // display whose smallest side is 600dp or more, so a portrait-only phone app
+  // will be seen landscape and at tablet width whether it asked to be or not.
+  const { PROFILES, profileSettings } = await import('../src/cli.mjs');
+  const yatay = profileSettings('pixel-landscape');
+  assert.ok(yatay.viewport.width > yatay.viewport.height, 'landscape means wider than tall');
+  assert.ok(yatay.viewport.height <= 420, `a short viewport is the whole point, got ${yatay.viewport.height}`);
+  assert.equal(yatay.isMobile, true, 'still a touch device — the 44px rule must still apply');
+
+  const katlanir = profileSettings('foldable');
+  assert.ok(katlanir.viewport.width >= 600 && katlanir.viewport.width <= 840,
+    `600-840dp is the band the Android rule keys on, got ${katlanir.viewport.width}`);
+  assert.equal(katlanir.isMobile, true);
+
+  // A label that states a number must state the right one: Playwright's own
+  // device data won this argument once already.
+  for (const k of ['pixel-landscape', 'foldable']) {
+    const sayi = /(\d{3,4})px/.exec(PROFILES[k].label);
+    if (!sayi) continue;
+    const v = profileSettings(k).viewport;
+    assert.ok([v.width, v.height].includes(Number(sayi[1])),
+      `${k} label says ${sayi[1]}px but the viewport is ${v.width}x${v.height}`);
+  }
+});

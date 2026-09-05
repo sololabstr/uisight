@@ -42,6 +42,14 @@ export const PROFILES = {
   'pixel': { engine: 'chromium', pw: 'Pixel 7', label: 'Pixel 7 — Android Chrome', mobile: true },
   'galaxy': { engine: 'chromium', pw: 'Galaxy S9+', label: 'Galaxy S9+ — Android', mobile: true },
   'ipad': { engine: 'webkit', pw: 'iPad (gen 7)', label: 'iPad — tablet breakpoint', mobile: true },
+  // Android 16 (API 36) ignores an app's orientation, aspect-ratio and
+  // resizability restrictions on any display whose smallest side is 600dp or
+  // more, and Android 17 removes the temporary opt-out. So a phone app that
+  // has only ever been seen portrait WILL be seen landscape and at tablet
+  // widths, whether or not it asked to be.
+  // https://developer.android.com/develop/adaptive-apps/guides/app-orientation-aspect-ratio-resizability
+  'pixel-landscape': { engine: 'chromium', pw: 'Pixel 7 landscape', label: 'Pixel 7 landscape — 360px tall', mobile: true },
+  'foldable': { engine: 'chromium', pw: 'Foldable inner', label: 'Foldable inner / small tablet — 700px', mobile: true },
   'desktop': { engine: 'chromium', pw: 'Desktop 1440', label: 'Desktop — 1440px', mobile: false },
   'laptop': { engine: 'chromium', pw: 'Laptop 1366', label: 'Laptop — 1366px', mobile: false },
 };
@@ -55,6 +63,13 @@ const FALLBACK_DEVICES = {
   'Pixel 7': { viewport: { width: 412, height: 915 }, deviceScaleFactor: 2.6, isMobile: true, hasTouch: true },
   'Galaxy S9+': { viewport: { width: 320, height: 658 }, deviceScaleFactor: 4.5, isMobile: true, hasTouch: true },
   'iPad (gen 7)': { viewport: { width: 810, height: 1080 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true },
+  // Pixel 7 turned on its side: the short viewport is the point. A sticky
+  // header plus a bottom bar can leave almost nothing for the content.
+  'Pixel 7 landscape': { viewport: { width: 863, height: 360 }, deviceScaleFactor: 2.625, isMobile: true, hasTouch: true },
+  // 700px sits inside Android's 600-840dp "medium" width class -- the band the
+  // orientation rule keys on, and where most sites switch to a desktop layout
+  // while the input is still a thumb.
+  'Foldable inner': { viewport: { width: 700, height: 1000 }, deviceScaleFactor: 2.2, isMobile: true, hasTouch: true },
   'Desktop 1440': { viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1, isMobile: false, hasTouch: false },
   'Laptop 1366': { viewport: { width: 1366, height: 768 }, deviceScaleFactor: 1, isMobile: false, hasTouch: false },
 };
@@ -998,7 +1013,21 @@ export const INSPECTION_SCRIPT = (settings) => {
   if (isMobile) {
     const meta = document.querySelector('meta[name="viewport"]');
     const cover = /viewport-fit\s*=\s*cover/i.test(meta ? meta.getAttribute('content') || '' : '');
-    if (cover) {
+    // Android does not work like iOS here. Edge-to-edge is not something the
+    // page opts into -- from targetSdk 35 the system draws the app under the
+    // status bar and the gesture handle whether it asked to or not, and the app
+    // is expected to handle the insets:
+    // https://developer.android.com/about/versions/15/behavior-changes-15
+    //
+    // So the gate is not a viewport flag, it is whether this page can BECOME an
+    // app. A web app manifest is that signal, and it keeps ordinary websites --
+    // which sit below the browser's own chrome and never meet a system bar --
+    // out of the finding.
+    const iceriginKapagi = (ad) => (document.querySelector(`meta[name="${ad}"]`) || {}).content || '';
+    const paketlenebilir = !!document.querySelector('link[rel="manifest"]')
+      || /^yes$/i.test(iceriginKapagi('mobile-web-app-capable'))
+      || /^yes$/i.test(iceriginKapagi('apple-mobile-web-app-capable'));
+    if (cover || paketlenebilir) {
       // Sayfanin kendi CSS'i pay kullaniyor mu. Baska kaynaktan gelen stil
       // sayfasi okunamaz (SecurityError) — okunamayani "kullanmiyor" saymak
       // yanlis alarm uretir, o yuzden okunamayan varsa kontrol susar.
@@ -1033,7 +1062,9 @@ export const INSPECTION_SCRIPT = (settings) => {
           result.unsafeArea.push({
             sel: describe(el), edge: ust ? 'top' : 'bottom',
             text: shortLabel(kontrol) || (el.innerText || '').trim().slice(0, 40) || '(no text)',
-            note: 'viewport-fit=cover set, safe-area-inset never used',
+            note: cover
+              ? 'viewport-fit=cover set, safe-area-inset never used'
+              : 'installable web app: packaged for Android it draws under the system bars from targetSdk 35, and safe-area-inset is never used',
           });
           if (result.unsafeArea.length >= 4) break;
         }
