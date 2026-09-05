@@ -5,6 +5,10 @@ site, next to a desktop one, both live, inside the window you are already in.
 
 And then it measures what a screenshot cannot.
 
+![The uisight panel: a desktop and a phone view of the same page running side by
+side, with measured findings listed beside them — contrast ratios to two decimal
+places, touch targets under 44px, counted per device](https://raw.githubusercontent.com/sololabstr/uisight/main/docs/assets/live-panel.png)
+
 ## Why measure instead of look
 
 A model can see your screenshot. It cannot see that the label is 4.38:1 against
@@ -36,6 +40,18 @@ Every check has a false-alarm test next to its detection test. A tool that cries
 wolf on every bottom navigation bar gets ignored, and then its real findings go
 unread too.
 
+The same engine runs without the editor, over every device and both themes at
+once, and writes a gallery you can scroll through — one card per screen, its own
+findings under it:
+
+![A one-shot audit: four cards — iPhone 15 Pro and Pixel 7, each in light and
+dark — with the findings for each screen listed underneath, naming the element
+and the measurement](https://raw.githubusercontent.com/sololabstr/uisight/main/docs/assets/gallery.png)
+
+```bash
+npx uisight https://yourapp.com --theme both
+```
+
 ## Using it
 
 Click the uisight icon in the activity bar. The panel opens with a phone and a
@@ -66,8 +82,16 @@ pages, `UISIGHT_TOOLS=core` cuts that fixed cost from ~1,065 tokens to ~419.
 
 [Node.js](https://nodejs.org) 20 or newer. Nothing else — the extension runs the
 published `uisight` package through `npx`, so the engine updates itself and you
-never pin a version by accident. The first run downloads the package and a
-browser, which takes a few minutes once.
+never pin a version by accident.
+
+Playwright ships its driver over npm but downloads browsers separately, so the
+first run has nothing to drive yet. Started from a terminal, uisight offers to
+fetch it (~150 MB, once) and shows the progress; started by the editor, where
+there is nobody to answer, it names the command instead:
+
+```bash
+npx playwright install chromium        # add webkit for the real iOS Safari engine
+```
 
 Working on uisight itself? Point `uisight.toolPath` at your checkout and it runs
 that instead.
