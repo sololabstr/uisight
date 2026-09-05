@@ -783,3 +783,26 @@ test('a genuinely half-translated screen is still reported', async () => {
   assert.ok(hit, 'half the controls being English is the case this check exists for');
   assert.ok(hit.share >= 10, `minority share should be meaningful, got ${hit.share}%`);
 });
+
+test('the theme signature records colours in one spelling, not the browser\'s', async () => {
+  // A real report showed the same white twice: `oklab(1 0 0 / 0.8)` on one
+  // device and `oklab(0.999994 0.0000455677 0.0000200868 / 0.8)` on another.
+  // That is 46 characters of noise per row, and this signature is compared
+  // string against string to decide whether a colour survived the theme
+  // switch — two spellings of one colour is a comparison waiting to be wrong.
+  const d = await inspect(`
+    <main style="background:oklab(0.999994 0.0000455678 0.0000200868 / 0.8)">
+      <p style="color:oklch(0.55 0.2 250)">measured</p>
+      <button style="color:rgb(255,255,255);background:#3b82f6">go</button>
+    </main>`);
+  const imza = d.themeSignature || [];
+  assert.ok(imza.length, 'the signature must have entries to check');
+  for (const x of imza) {
+    for (const alan of ['color', 'bg', 'border']) {
+      assert.doesNotMatch(x[alan] || '', /okla?[bc]\(/,
+        `${alan} kept the browser's spelling: ${x[alan]}`);
+      assert.match(x[alan] || '#000000', /^(#[0-9a-f]{6}( \d+%)?|)$/,
+        `${alan} should be a hex colour, got ${JSON.stringify(x[alan])}`);
+    }
+  }
+});

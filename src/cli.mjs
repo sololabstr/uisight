@@ -533,7 +533,14 @@ export const INSPECTION_SCRIPT = (settings) => {
   const signatureTargets = [...document.querySelectorAll('body,header,nav,main,footer,button,a,input,[class*="card"],[class*="panel"],[class*="modal"],[class*="menu"]')].filter(isVisible).slice(0, 60);
   for (const el of signatureTargets) {
     const st = getComputedStyle(el);
-    result.themeSignature.push({ sel: describe(el), text: shortLabel(el).slice(0, 24), color: st.color, bg: st.backgroundColor, border: st.borderTopColor });
+    // Normalised, not raw. Two reasons, both seen in one real report: the same
+    // white came back as `oklab(1 0 0 / 0.8)` on one device and
+    // `oklab(0.999994 0.0000455677 0.0000200868 / 0.8)` on another — 46
+    // characters of noise in the report, and, since this signature is compared
+    // string against string to decide whether a colour survived the theme
+    // switch, two spellings of one colour is a comparison waiting to be wrong.
+    const yaz = (s) => { const c = rgb(s); return c ? hex(c) : String(s || ''); };
+    result.themeSignature.push({ sel: describe(el), text: shortLabel(el).slice(0, 24), color: yaz(st.color), bg: yaz(st.backgroundColor), border: yaz(st.borderTopColor) });
   }
 
   // Lists are capped so a bad page does not flood the report (and the agent's
@@ -1531,7 +1538,11 @@ async function tur(o) {
         l.inspection.themeSignature.forEach((x, i) => {
           const es = darkMap.get(`${i}|${x.sel}`);
           if (!es) return;
-          const zeminSaydam = /rgba\([^)]*,\s*0\)/.test(x.bg);
+          // The signature is normalised now, so a fully transparent background
+          // arrives as "#000000 0%" rather than "rgba(0, 0, 0, 0)". Matching the
+          // old spelling here would silently stop excluding them, and every
+          // transparent element would start reporting as theme-frozen.
+          const zeminSaydam = / 0%$/.test(x.bg);
           if (x.color === es.color && x.bg === es.bg && !zeminSaydam) {
             frozen.push({ sel: x.sel, text: x.text, color: x.color, bg: x.bg });
           }
