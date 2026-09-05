@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.31.0 — 2026-09-05
+
+The phone in the side bar was drawn two and a half times life size.
+
+Frames are captured below 1:1 to keep their token cost down, and the card filled
+whatever width the side bar had. Measured: a 412px capture drawn at 792px in an
+820px side bar, and 2.5x on a smaller capture. The blur is the lesser problem —
+a 44px touch target looks like 110px there, so the one view whose whole purpose
+is judging a phone layout was quietly lying about it. Reported by someone
+looking at the panel and saying the mobile screen looked wrong.
+
+The card now carries its session's viewport width, and the frame is capped at
+`min(100%, that)`: it shrinks in a narrow side bar, sits at life size in a wide
+one, and never grows past it. The desktop frame keeps scaling down to fit, which
+is what it should do — 1440px was never going to be life size in a side bar.
+
 ## 0.30.0 — 2026-09-05
 
 A second field round: three sites it had never seen, seven defects, all its own.

@@ -995,7 +995,7 @@ const PANEL_HTML_SABLON = `<!doctype html><html lang="en"><head><meta charset="u
      dairesel. Acik bir tavan olmadan kart dogal boyutuna acilir ve kenar
      cubugundan tasar — bu yuzden kart da goruntu de kaba zorlanir. */
   body.narrow .tel { padding:4px; border-radius:10px; width:100%; max-width:100%; box-sizing:border-box; }
-  body.narrow .tel img { width:100%; max-width:100%; max-height:none; height:auto; }
+  body.narrow .tel img { width:100%; max-width:min(100%, var(--vp, 100%)); max-height:none; height:auto; margin:0 auto; display:block; }
   body.narrow .yan { min-width:0; max-width:100%; }
   body.narrow .ust { padding:6px 8px; gap:6px; }
   /* Baslik dar alanda uc satira boluniyor ve igneyi kenardan kirpiyordu:
@@ -1151,6 +1151,12 @@ const PANEL_HTML_SABLON = `<!doctype html><html lang="en"><head><meta charset="u
       vp[o.id] = o.viewport;
       let pane = kap.querySelector('[data-session="' + o.id + '"]');
       if (!pane) { pane = paneOlustur(o); kap.appendChild(pane); }
+      // Life size, and never past it. The frame is captured below 1:1 to keep
+      // its token cost down, so filling the card would blow a 320px capture up
+      // to whatever the side bar is wide -- measured at 2.5x, which makes a
+      // 44px touch target look like 110px. Judging a phone layout from that is
+      // worse than not seeing it.
+      if (o.viewport && o.viewport.width) pane.style.setProperty('--vp', o.viewport.width + 'px');
       const sel = pane.querySelector('select');
       if (!sel.options.length && deviceList.length) {
         for (const c of deviceList) { const op = document.createElement('option'); op.value = c.k; op.textContent = c.label; sel.appendChild(op); }
