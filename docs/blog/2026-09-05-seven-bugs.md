@@ -2,17 +2,20 @@
 title: "I pointed my UI-auditing tool at three sites it had never seen. All seven bugs it found were its own."
 published: false
 tags: testing, webdev, mcp, showdev
+cover_image: https://raw.githubusercontent.com/sololabstr/uisight/main/docs/assets/live-panel.png
 ---
 
 The line at the bottom of the report said:
 
-```
+```text
 Records with automated findings: 8/4
 ```
 
 Eight out of four. More screens with findings than screens.
 
 I wrote this tool. It measures web UIs — contrast ratios against the real composited background, touch targets under 44px, controls that something else is painting over, text clipped by its own container. It has 142 tests. Every one of them passed while it printed that number.
+
+![The panel: a desktop and a phone view of the same page side by side, with the measured findings listed beside them — contrast ratios to two decimal places, touch targets under 44px, counted per device](https://raw.githubusercontent.com/sololabstr/uisight/main/docs/assets/live-panel.png)
 
 Here is what was underneath it, and what the exercise taught me about the kind of bug tests are structurally bad at catching.
 
@@ -43,12 +46,16 @@ Once you have seen it, you start finding it.
 
 That last one produced my favourite finding of the round. Two of the three apps reported button labels like this:
 
-```
+```text
 button 71x34 — "add Şarkı"
 button 36x34 — "light_mode"
 ```
 
 Icon fonts put the icon's *name* in the text node and draw a glyph over it. So `innerText` reads what nobody sees, and half the label's 45 characters go to something invisible. Labels skip icon elements now and keep the words around them — and for an icon-only button, where there is nothing left to read, they fall back to the accessible name. The theme toggle went from `light_mode` to `Tema değiştir`. The report ended up more useful than it was before the bug existed.
+
+Those labels appear all over the output. Run from the command line instead of the editor, the tool walks every device and both themes in one pass and writes a gallery — one card per screen, its own findings underneath it — so a bad label is a bad label in forty places at once:
+
+![A one-shot audit: four cards, iPhone and Pixel in light and dark, each with its findings listed underneath — the element named, the measurement given](https://raw.githubusercontent.com/sololabstr/uisight/main/docs/assets/gallery.png)
 
 ## Why 142 tests caught none of it
 
@@ -67,6 +74,8 @@ That one had a second edge, worth saying out loud. The docs pointed at a name no
 I could not have found the rest by running anything. Someone opened the panel and said the mobile screen looked wrong.
 
 It did. Frames are captured below 1:1 to keep their token cost down, and the card filled whatever width the side bar had. A 412px capture was being drawn at 792px. The blur is the lesser problem: **a 44px touch target looks like 110px there**. The one view whose entire purpose is judging a phone layout was quietly lying about it.
+
+![Before and after, same side bar and same capture: on the left the phone frame stretched to 792px, on the right capped at the device width of 412px](https://raw.githubusercontent.com/sololabstr/uisight/main/docs/assets/frame-scale.png)
 
 Then: "the refresh button reopens the old site." I had put a refresh glyph on the panel switcher, a few pixels above the panel's own refresh button, which reloads the page. Two identical controls, different actions — the exact thing this tool flags on other people's interfaces.
 
