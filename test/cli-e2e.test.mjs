@@ -82,3 +82,35 @@ test('each page reports its own console errors, not the ones before it', async (
       `${r.path} should carry its own error, has ${JSON.stringify(r.console)}`);
   }
 });
+
+test('the summary counts screens, and a screen with a finding is never called clean', async () => {
+  // The counter incremented once per finding TYPE while its label said
+  // "records", so a real report read "Records with automated findings: 8/4".
+  // Worse, a second hand-maintained list decided whether to print "automated
+  // checks clean" — and it had fallen behind the checks, so a screen could
+  // carry a finding and be declared clean in the same breath.
+  await run(process.execPath, [
+    join(root, 'src', 'cli.mjs'),
+    `http://127.0.0.1:${port}/`,
+    '--path', '/bir,/iki',
+    '--device', 'pixel',
+    '--theme', 'light',
+    '--no-open',
+  ], { cwd: outRoot, env: { ...process.env, NO_UPDATE_NOTIFIER: '1' }, timeout: 180000 });
+
+  const dizinler = readdirSync(join(outRoot, 'uisight-outputs'));
+  const dizin = dizinler[dizinler.length - 1];
+  const rapor = readFileSync(join(outRoot, 'uisight-outputs', dizin, 'REPORT.md'), 'utf8');
+
+  const m = /Records with automated findings: (\d+)\/(\d+)/.exec(rapor);
+  assert.ok(m, 'the summary line must be there');
+  const [, bulan, toplam] = m.map(Number);
+  assert.ok(bulan <= toplam, `a count of screens cannot exceed the screens: got ${bulan}/${toplam}`);
+
+  // Every page here logs a console error, so every screen has a finding and
+  // none of them may claim to be clean.
+  assert.equal(toplam, 2, 'two paths, two screens');
+  assert.equal(bulan, 2, 'both screens log an error, so both have a finding');
+  assert.ok(!rapor.includes('automated checks clean'),
+    'no screen here is clean; saying so means the two lists disagree again');
+});

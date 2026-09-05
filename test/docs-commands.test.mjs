@@ -70,3 +70,18 @@ for (const [ad, dosya] of Object.entries(pkg.bin)) {
     assert.ok(stdout.length > 80, `${ad} --help printed almost nothing`);
   });
 }
+
+test('a flag this command does not know is refused, not dropped', async () => {
+  // `--desktop desktop` is a real flag — of uisight-panel. The CLI took it,
+  // said nothing, and produced two phone profiles and a report that never
+  // mentioned the desktop one was missing.
+  const CLI = join(root, 'src', 'cli.mjs');
+  let hata = null;
+  try {
+    await calistir(process.execPath, [CLI, 'https://example.com', '--desktop', 'desktop'], { timeout: 25000 });
+  } catch (e) { hata = e; }
+  assert.ok(hata, 'it must not proceed');
+  assert.equal(hata.code, 2);
+  assert.match(hata.stderr, /unknown option: --desktop/);
+  assert.match(hata.stderr, /belongs to uisight-panel/, 'say where the flag does live');
+});

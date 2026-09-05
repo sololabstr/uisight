@@ -88,9 +88,18 @@ function parseArgs(argv) {
     else if (a === '--help' || a === '-h') o.printHelp = true;
     else rest.push(a);
   }
-  o.url = rest[0] || null;
+  o.url = rest.find((x) => !x.startsWith('-')) || null;
+  // A flag this does not know used to be dropped without a word. `--desktop
+  // desktop` is a real flag -- of uisight-panel, not of this -- so a run that
+  // asked for a desktop profile quietly produced two phones and a report that
+  // did not mention the omission.
+  o.unknownFlags = rest.filter((x) => x.startsWith('-'));
   return o;
 }
+
+// Flags that exist, but on the other command. Worth naming: the mistake is
+// copying a line from the panel's help, not inventing a flag.
+export const PANEL_ONLY_FLAGS = new Set(['--desktop', '--single', '--port', '--narrow']);
 
 function printHelp() {
   console.log(`
@@ -1222,6 +1231,14 @@ async function main() {
     printHelp();
     process.exit(1);
   }
+  if (o.unknownFlags?.length) {
+    for (const f of o.unknownFlags) {
+      console.error(`  ! unknown option: ${f}`);
+      if (PANEL_ONLY_FLAGS.has(f)) console.error(`    ${f} belongs to uisight-panel, not to this command.`);
+    }
+    console.error('    uisight --help lists what this takes.');
+    process.exit(2);
+  }
   if (!/^https?:\/\//.test(o.url)) o.url = 'https://' + o.url;
 
   if (o.live) return canliAc(o.url, o.live);
@@ -1378,6 +1395,10 @@ async function tur(o) {
 
   let findingCount = 0;
   for (const k of records) {
+    // Bu sayac bulgu TURLERINI sayiyordu ve etiketi "kayit" diyordu, yani bir
+    // ekranda iki tur cikinca pay paydayi geciyordu: gercek bir rapor "8/4"
+    // yazdi. Ekran basina tek bayrak.
+    let bulguVar = false;
     lines.push(`## ${k.label} · ${k.theme} · ${k.path}`);
     if (k.error) { lines.push(`- **PAGE FAILED TO LOAD:** ${k.error}`); findingCount++; lines.push(''); continue; }
     lines.push(`- Image: \`${k.image}\``);
@@ -1385,114 +1406,114 @@ async function tur(o) {
 
     const d = k.inspection || {};
     if (d.horizontalOverflow) {
-      findingCount++;
+      bulguVar = true;
       lines.push(`- 🔴 **HORIZONTAL OVERFLOW**: page ${d.horizontalOverflow.pageWidth}px / viewport ${d.horizontalOverflow.viewportWidth}px`);
       for (const s of d.horizontalOverflow.overflowing) lines.push(`  - \`<${s.label} class="${s.className}">\` right edge ${s.right}px`);
     }
     if (d.smallTargets?.length) {
-      findingCount++;
+      bulguVar = true;
       lines.push(`- 🟡 **touch targets below 44px** (${kac(d, 'smallTargets')}):`);
       for (const s of d.smallTargets) lines.push(`  - \`${s.label}\` ${s.size} — "${s.text}"`);
     }
     if (d.tinyText?.length) {
-      findingCount++;
+      bulguVar = true;
       lines.push(`- 🟡 **text below 12px** (${d.tinyText.length}): ` + d.tinyText.map((m) => `${m.fontSize} "${m.text}"`).join(' · '));
     }
     if (d.invisibleText?.length) {
-      findingCount++;
+      bulguVar = true;
       lines.push(`- 🔴 **INVISIBLE TEXT** (contrast <1.6:1 — practically unreadable, ${kac(d, 'invisibleText')}):`);
       for (const s of d.invisibleText) lines.push(`  - \`${s.sel}\` ${s.ratio}:1 — text ${s.color} / bg ${s.bg} — "${s.text}"`);
     }
     if (d.lowContrast?.length) {
-      findingCount++;
+      bulguVar = true;
       lines.push(`- 🟡 **Low contrast** (below WCAG AA, ${kac(d, 'lowContrast')}):`);
       for (const s of d.lowContrast) lines.push(`  - \`${s.sel}\` ${s.ratio}:1 (threshold ${s.threshold}) ${s.fontSize} — "${s.text}"`);
     }
     if (d.buttonIssues?.length) {
-      findingCount++;
+      bulguVar = true;
       lines.push(`- 🟠 **Button issues** (${kac(d, 'buttonIssues')}):`);
       for (const s of d.buttonIssues) lines.push(`  - \`${s.sel}\` "${s.text}" → ${s.issues.join(' · ')}`);
     }
     if (d.coveredControls?.length) {
-      findingCount++;
+      bulguVar = true;
       lines.push(`- 🔴 **Covered controls** (something sits on top of them, ${kac(d, 'coveredControls')}):`);
       for (const s of d.coveredControls) lines.push(`  - \`${s.sel}\` "${s.text}" ${s.size} — ${s.percent}% covered by \`${s.coveredBy}\` "${s.coveredByText}"`);
     }
     if (d.coveredByFixed?.length) {
-      findingCount++;
+      bulguVar = true;
       lines.push(`- 🟠 **Hidden under a fixed bar** (${kac(d, 'coveredByFixed')}):`);
       for (const s of d.coveredByFixed) lines.push(`  - \`${s.sel}\` "${s.text}" — ${s.percent}% under \`${s.bar}\``);
     }
     if (d.clippedText?.length) {
-      findingCount++;
+      bulguVar = true;
       lines.push(`- 🟡 **Text cut off by its own box** (${kac(d, 'clippedText')}):`);
       for (const s of d.clippedText) lines.push(`  - \`${s.sel}\` "${s.text}" — ${s.hiddenPx}px hidden (${s.axis})`);
     }
     if (d.sameLookingActions?.length) {
-      findingCount++;
+      bulguVar = true;
       lines.push(`- 🟠 **No primary action** (every button in the row looks the same, ${kac(d, 'sameLookingActions')}):`);
       for (const s of d.sameLookingActions) lines.push(`  - \`${s.sel}\` ${s.count} buttons — ${s.labels.join(' / ')}`);
     }
     if (d.unsafeArea?.length) {
-      findingCount++;
+      bulguVar = true;
       lines.push(`- 🔴 **Under the notch / home indicator** (viewport-fit=cover set, safe-area-inset never used, ${kac(d, 'unsafeArea')}):`);
       for (const s of d.unsafeArea) lines.push(`  - \`${s.sel}\` ${s.edge} edge — "${s.text}"`);
     }
     if (d.darkModeLightPatches?.length) {
-      findingCount++;
+      bulguVar = true;
       lines.push(`- 🟠 **Light patches in dark mode** (${kac(d, 'darkModeLightPatches')}):`);
       for (const s of d.darkModeLightPatches) lines.push(`  - \`${s.sel}\` ${s.size} (${s.share}% of the screen) — ${s.bg}`);
     }
     if (d.mixedLanguage?.length) {
-      findingCount++;
+      bulguVar = true;
       for (const s of d.mixedLanguage) {
         lines.push(`- 🟡 **Two languages on one screen**: ${s.trCount} Turkish / ${s.enCount} English markers (${s.share}%) — ${s.englishWords.join(', ')}`);
       }
     }
     if (d.usDates?.length) {
-      findingCount++;
+      bulguVar = true;
       lines.push(`- 🟡 **US date format** (${kac(d, 'usDates')}): ` + d.usDates.map((s) => `${s.text} (${s.note})`).join(' · '));
     }
     if (d.clippedContainer?.length) {
-      findingCount++;
+      bulguVar = true;
       lines.push(`- 🔴 **Content clipped with no way to scroll** (${kac(d, 'clippedContainer')}):`);
       for (const s of d.clippedContainer) lines.push(`  - \`${s.sel}\` ${s.size}, ${s.hiddenPx}px hidden — "${s.text}"`);
     }
     if (d.textUnderControl?.length) {
-      findingCount++;
+      bulguVar = true;
       lines.push(`- 🔴 **Text disappearing behind a control** (${kac(d, 'textUnderControl')}):`);
       for (const s of d.textUnderControl) lines.push(`  - "${s.text}" behind \`${s.control}\` "${s.controlText}"`);
     }
     if (d.loadingButEmpty?.length) {
-      findingCount++;
+      bulguVar = true;
       lines.push(`- 🟠 **Says "empty" while still loading** (${kac(d, 'loadingButEmpty')}): `
         + d.loadingButEmpty.map((s) => `"${s.text}"`).join(' · '));
     }
     if (d.genericErrors?.length) {
-      findingCount++;
+      bulguVar = true;
       lines.push(`- 🟠 **Error message says nothing** (${kac(d, 'genericErrors')}):`);
       for (const s of d.genericErrors) lines.push(`  - \`${s.sel}\` "${s.text}"`);
     }
     if (d.destructiveWithoutConfirm?.length) {
-      findingCount++;
+      bulguVar = true;
       lines.push(`- 🔴 **Irreversible action with no confirmation on the page** (${kac(d, 'destructiveWithoutConfirm')}):`);
       for (const s of d.destructiveWithoutConfirm) lines.push(`  - \`${s.sel}\` "${s.text}"`);
     }
     if (d.eagerPermissions?.length) {
-      findingCount++;
+      bulguVar = true;
       lines.push(`- 🟠 **Permission requested during load, with nothing explaining it** (${kac(d, 'eagerPermissions')}): `
         + d.eagerPermissions.map((s) => `${s.api} at ${s.atMs}ms`).join(' · '));
     }
     if (d.imagesWithoutAlt) lines.push(`- ⚪ images without alt: ${d.imagesWithoutAlt}`);
-    if (k.console.length) { findingCount++; lines.push(`- 🔴 **Console/JS errors** (${k.console.length}):`); for (const c of k.console.slice(0, 5)) lines.push(`  - ${c.type}: ${c.message}`); }
-    if (k.network.length) { findingCount++; lines.push(`- 🔴 **Failed requests** (${k.network.length}):`); for (const a of k.network.slice(0, 5)) lines.push(`  - ${a.status} ${a.url}`); }
-    // A "clean" claim has to cover EVERY finding type: when invisible text / contrast /
-    // button issues were left out, the report printed "clean" right under its own findings.
-    const anyFinding = d.horizontalOverflow || d.smallTargets?.length || d.tinyText?.length
-      || d.invisibleText?.length || d.lowContrast?.length || d.buttonIssues?.length
-      || k.console.length || k.network.length
-      || d.coveredControls?.length || d.clippedText?.length || d.coveredByFixed?.length;
-    if (!anyFinding) lines.push('- ✅ automated checks clean (still eyeball the image)');
+    if (k.console.length) { bulguVar = true; lines.push(`- 🔴 **Console/JS errors** (${k.console.length}):`); for (const c of k.console.slice(0, 5)) lines.push(`  - ${c.type}: ${c.message}`); }
+    if (k.network.length) { bulguVar = true; lines.push(`- 🔴 **Failed requests** (${k.network.length}):`); for (const a of k.network.slice(0, 5)) lines.push(`  - ${a.status} ${a.url}`); }
+    // There used to be a second, hand-maintained list of what counts as a
+    // finding here, and it had fallen behind the checks: a screen whose only
+    // problem was one of the newer types printed the finding and then "clean"
+    // underneath it. The flag is set by every branch that actually prints
+    // something, so it cannot drift.
+    if (bulguVar) findingCount++;
+    else lines.push('- ✅ automated checks clean (still eyeball the image)');
     lines.push('');
   }
   // --- Theme comparison: identical colors in light and dark mean the toggle is not wired up ---
