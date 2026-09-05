@@ -1037,12 +1037,21 @@ const PANEL_HTML_SABLON = `<!doctype html><html lang="en"><head><meta charset="u
   </div>
 </div>
 <script>
-  window.__UISIGHT_TOKEN = '__TOKEN__';
   const vp = {}; // session -> viewport
   let deviceList = [];
   let activeSession = 'mobile';
 
-  const act = (g) => fetch('/action', { method:'POST', headers:{'content-type':'application/json','x-uisight-token':window.__UISIGHT_TOKEN}, body: JSON.stringify(g) }).then(r=>r.json());
+  // The token is what stops a web page you happen to be visiting from driving
+  // your browser session: it travels in a custom header, so a cross-origin
+  // caller cannot send it, and cannot read it either, because this response
+  // carries no CORS headers. It was reachable by name as
+  // window.__UISIGHT_TOKEN, which is a needless global for a secret -- the
+  // closure keeps it out of every other script's reach. (The panel's own
+  // functions stay global on purpose: the markup uses inline handlers.)
+  const act = (() => {
+    const token = '__TOKEN__';
+    return (g) => fetch('/action', { method:'POST', headers:{'content-type':'application/json','x-uisight-token':token}, body: JSON.stringify(g) }).then(r=>r.json());
+  })();
   const toast = (m) => { document.getElementById('statusLine').textContent = m; setTimeout(()=>{document.getElementById('statusLine').textContent='';}, 4000); };
 
   function paneOlustur(o) {

@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+
+The panel's action token no longer sits on `window`.
+
+From an outside contribution (PR #1, an automated scanner). Its premise was
+wrong: putting a token in the page it authorizes is not XSS, and the token's job
+is to stop a site you happen to be visiting from driving your browser session —
+it travels in a custom header a cross-origin caller cannot send, and cannot read
+back either, because the panel sends no CORS headers. None of that needs the
+token hidden from its own page.
+
+The narrower point underneath was fair, though, and its patch did not go far
+enough: moving the value to a top-level `const` leaves it readable by name from
+any other script in the page. It lives in a closure now, so nothing else can
+reach it under any name. Checked in a browser rather than by reading: the global
+is `undefined`, the identifier is unreachable, the panel's buttons still work,
+and a request without the header still gets 403.
+
 ## 0.28.0 — 2026-09-05
 
 It fetches the browser itself now, if you say yes.
