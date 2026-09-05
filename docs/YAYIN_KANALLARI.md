@@ -52,17 +52,30 @@ yol olarak sayılıyor.
 
 ## Henüz kayıtlı olmadığımız yerler
 
-- **Open VSX doğrulama rozeti** — namespace `sololabstr` var ama `verified:false`.
-  Talep: https://github.com/EclipseFdn/open-vsx.org/issues/new/choose →
-  "Claim namespace ownership". Kanıt: namespace adı = depoyu barındıran GitHub
-  organizasyonu. Önce open-vsx.org'a giriş yapmak gerekiyor.
-- **mcp.so** — https://mcp.so/submit?type=server (ücretsiz inceleme veya ücretli
-  anında yayın).
-- **Smithery** — depodaki `smithery.yaml` eski `startCommand` biçiminde; güncel
-  belgeler yerel stdio sunucular için `.mcpb` paketi istiyor. Dosyanın hâlâ
-  çalışıp çalışmadığı DOĞRULANMADI.
+- **Open VSX doğrulama rozeti** — namespace `sololabstr` var, PAT yayımlayabiliyor
+  (erişim var) ama `verified:false` (sahiplik yok). Talep AÇILDI 5 Eyl:
+  https://github.com/EclipseFdn/open-vsx.org/issues/13032 — Option 1 kanıtıyla
+  (Marketplace yayıncısı + package.json'ın işaret ettiği depo aynı organizasyona
+  ait). 🔴 Şablon talebi yapan hesapta 12 ay kamuya açık geçmiş istiyor;
+  `yusufcemres` 25 Mart 2026 açılışlı, yani 5,4 aylık. O kutu işaretlenmedi,
+  gerekçe issue'da açıkça yazıldı. Reddedilirse Mart 2027'de tekrar.
+- **mcp.so** — gönderildi 5 Eyl: https://github.com/chatmcp/mcpso/issues/3955
+  (şablon yok, serbest biçim; kabul görmüş bir gönderi örnek alındı).
+- **Smithery** — güncel belgelerde `smithery.yaml` HİÇ geçmiyor; üç yayın türü
+  var: hosted, external (URL) ve stdio için **MCPB paketi**. Depodaki dosya eski
+  `startCommand` biçiminde, çalışıp çalışmadığı doğrulanmadı — silinmedi ama
+  içine bu not yazıldı.
+- 🔑 **MCPB paketi — asıl fırsat, ayrı iş.** `.mcpb` artık resmi MCP paket biçimi
+  (modelcontextprotocol/mcpb). Yerel sunucuyu ZIP + manifest.json olarak
+  paketliyor ve Claude Desktop / Claude Code / MCP for Windows'ta **tek tıkla
+  kurulum** veriyor — yani her yeni kullanıcının JSON düzenleme adımı kalkıyor.
+  Smithery'nin stdio kaydı da bunu istiyor. Üretim bağımlılıkları ~31 MB
+  (playwright-core 14M + zod 5.9M + sdk 5.7M + playwright 5M), sıkıştırılmış
+  paket 12-15 MB civarı beklenir; tarayıcılar dahil değil, ilk çalıştırma
+  indirmesi yine geçerli. Tahmini yarım gün: manifest, `mcpb` CLI ile paketleme,
+  gerçek bir kurulum denemesi, sürümde üreten CI adımı.
 - **glama.ai/mcp** ve `punkpeye/awesome-mcp-servers` (PR) — düşük maliyetli iki
-  vitrin daha.
+  vitrin daha, henüz yapılmadı.
 
 ## Sayılar (5 Eylül 2026)
 

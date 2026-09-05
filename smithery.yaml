@@ -1,5 +1,16 @@
-# Smithery listing (https://smithery.ai) — lets Smithery start uisight's MCP server.
-# Nothing here is required for normal use: `npx -y -p uisight uisight-mcp` works on its own.
+# Smithery (https://smithery.ai) start configuration, in the older
+# `startCommand` format.
+#
+# UNVERIFIED as of 2026-09-05: Smithery's current publishing docs describe three
+# release types -- hosted, external URL, and stdio via an MCPB bundle -- and do
+# not mention this file at all. It is kept rather than deleted because it may
+# still be read for existing listings, and removing something that works is
+# worse than carrying something that might not. The real path for a local stdio
+# server like this one is an MCPB bundle, which also buys one-click install in
+# Claude Desktop and Claude Code; see docs/YAYIN_KANALLARI.md.
+#
+# Nothing here is required for normal use: `npx -y -p uisight uisight-mcp` works
+# on its own.
 startCommand:
   type: stdio
   configSchema:
