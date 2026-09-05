@@ -981,12 +981,16 @@ const PANEL_HTML_SABLON = `<!doctype html><html lang="en"><head><meta charset="u
   .yan { flex:1; min-width:230px; display:flex; flex-direction:column; gap:10px; }
 
   /* Dar mod (?narrow=1) — IDE kenar cubugu icin.
-     Kenar cubugu ~300px; iki ekran yan yana sigmaz, telefon cercevesi tek basina
-     412px. Masaustu oturumu gizlenir ve telefon kaba sigacak sekilde kuculur:
-     okunmayan iki sutun yerine okunan tek sutun. */
+     Kenar cubugu ~300px; iki ekran YAN YANA sigmaz — telefon cercevesi tek
+     basina 412px. Ilk cozum masaustu oturumunu gizlemekti, ve o yanlisti:
+     "telefon ve masaustu birlikte" bu aracin butun tezi, ve gizlemek onu tam
+     da insanin bakmayi aliskanlik ettigi yerden cikariyor. Yan yana sigmayan
+     sey alt alta siger. Masaustu ustte, kucuk: 1440px'i 284px'e indirince
+     yazi okunmaz ama duzenin bozulup bozulmadigi gorunur, ve okumak icin
+     zaten Inspect var. */
   body.narrow .gov { flex-direction:column; padding:8px; gap:8px; }
   body.narrow .ekranlar { flex-direction:column; max-width:100%; }
-  body.narrow .tel[data-session="web"] { display:none; }
+  body.narrow .tel[data-session="web"] { order:-1; }
   /* Kart genisligini goruntu belirler ve goruntu genisligini kart belirler:
      dairesel. Acik bir tavan olmadan kart dogal boyutuna acilir ve kenar
      cubugundan tasar — bu yuzden kart da goruntu de kaba zorlanir. */

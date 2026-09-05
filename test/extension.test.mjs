@@ -94,10 +94,18 @@ test('the narrow-mode flag the extension sends is one the panel reads', () => {
   }
 });
 
-test('narrow mode hides the desktop session and caps the card at the viewport', () => {
-  // Both halves matter: hiding one column is pointless if the remaining card
-  // still sizes itself to its own image and overflows the side bar.
-  assert.match(server, /body\.narrow \.tel\[data-session="web"\] \{ display:none/);
+test('narrow mode stacks the two sessions and caps each card at the viewport', () => {
+  // The side bar cannot fit two screens side by side, and the first answer to
+  // that was to hide the desktop one. That was wrong: "the phone and the
+  // desktop together" is what this tool is for, and hiding one takes it away
+  // from the place people actually keep an eye on it. What does not fit side
+  // by side fits stacked, desktop first.
+  assert.doesNotMatch(server, /body\.narrow \.tel\[data-session="web"\] \{ display:none/,
+    'the desktop session must not be hidden in the side bar');
+  assert.match(server, /body\.narrow \.ekranlar \{ flex-direction:column/, 'stacked, not side by side');
+  assert.match(server, /body\.narrow \.tel\[data-session="web"\] \{ order:-1/, 'desktop on top');
+  // Capping still matters: a card that sizes itself to its own image overflows
+  // the side bar, which is how this looked broken before either fix.
   assert.match(server, /body\.narrow \.tel \{[^}]*max-width:100%/);
 });
 

@@ -1,6 +1,23 @@
 # Changelog
 
-## Unreleased
+## 0.29.0 — 2026-09-05
+
+The side bar shows both screens again.
+
+Yesterday's narrow mode hid the desktop session, because ~300px cannot hold two
+screens side by side and a 1440px view squeezed next to a phone was unreadable.
+The reasoning was sound and the conclusion was wrong: "the phone and the desktop
+together" is what this tool is for, and hiding one takes half of it away from
+the one place people keep glancing at. Reported by someone who noticed it had
+gone.
+
+What does not fit side by side fits stacked. Desktop on top at 284px, phone
+below, no horizontal overflow — measured in a 300px viewport, not assumed. The
+text in the small view is not readable and does not need to be: what you are
+looking for there is whether the layout broke, and reading is what Inspect is
+for.
+
+### Also in this release
 
 The panel's action token no longer sits on `window`.
 
