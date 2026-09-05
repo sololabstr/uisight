@@ -227,11 +227,17 @@ function gomuluHtml(p, dar, paneller = []) {
     `<option value="${x.port}"${x.port === p ? ' selected' : ''}>${x.port} · ${kisalt(x.url) || 'bos'}</option>`,
   ).join('');
 
-  const cubuk = hepsi.length > 1 ? `
+  // Always drawn, even for a single panel. Hiding it below two looked tidy and
+  // was a trap: the only way to notice a panel that started AFTER the side bar
+  // opened was the Scan button, and Scan only existed once a scan had already
+  // found something. Someone who started a second panel could not reach it at
+  // all. It also answers a question worth answering on its own -- which panel
+  // am I looking at.
+  const cubuk = `
   <div class="sw">
     <select id="sec" title="Which running panel to show">${secenekler}</select>
     <button id="yenile" title="Look again for panels that started since this opened">Scan</button>
-  </div>` : '';
+  </div>`;
 
   return `<!doctype html><html><head><meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; frame-src ${kaynaklar}; style-src 'unsafe-inline'; script-src 'unsafe-inline';">

@@ -296,10 +296,16 @@ const PANELLER = [
   { port: 5109, url: 'https://fiko.sololabs.tr/transactions/723/edit' },
 ];
 
-test('the switcher appears only when there is something to switch between', () => {
-  assert.ok(!gomuluHtml(5062, true, [PANELLER[0]]).includes('id="sec"'), 'one panel needs no chooser');
-  assert.ok(!gomuluHtml(5062, true, []).includes('id="sec"'), 'no discovery, no chooser');
-  assert.ok(gomuluHtml(5062, true, PANELLER).includes('id="sec"'), 'two panels need a chooser');
+test('the switcher is always reachable, even with one panel', () => {
+  // Hiding it below two panels looked tidy and was a trap: the only way to
+  // notice a panel that started after the side bar opened was the Scan button,
+  // and Scan only existed once a scan had already found something. A user who
+  // started a second panel could not reach it at all.
+  for (const liste of [[PANELLER[0]], [], PANELLER]) {
+    const html = gomuluHtml(5062, true, liste);
+    assert.ok(html.includes('id="sec"'), `no chooser for ${liste.length} panel(s)`);
+    assert.ok(html.includes('id="yenile"'), `no way to scan again for ${liste.length} panel(s)`);
+  }
 });
 
 test('every panel you can pick is a frame the CSP will actually load', () => {

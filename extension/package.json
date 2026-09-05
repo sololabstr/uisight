@@ -2,7 +2,7 @@
   "name": "uisight",
   "displayName": "uisight — live mobile panel",
   "description": "See the running app on a phone screen inside your editor, switch device and theme, and measure what a screenshot cannot: contrast, touch targets, covered controls.",
-  "version": "1.7.1",
+  "version": "1.7.2",
   "publisher": "sololabstr",
   "private": false,
   "engines": {
