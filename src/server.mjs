@@ -29,7 +29,7 @@ import { PROFILES, deviceSettings, INSPECTION_SCRIPT, PERMISSION_HOOKS, missingB
 import { signIn, switchRole, recipeFor, accountNames, checkPort } from './login.mjs';
 import { checkForUpdate } from './update-check.mjs';
 import { normalizeTarget } from './target-url.mjs';
-import { offerInstall } from './install-browser.mjs';
+import { offerInstall, missingEngines } from './install-browser.mjs';
 
 
 // Live artifacts live under the user's home — never inside the package (npx → node_modules).
@@ -215,6 +215,7 @@ const publicState = () => ({
     mobile: o.profile.mobile !== false, keyboard: !!o.keyboard,
     engine: o.engine, engineRequested: o.engineRequested,
     engineFellBack: o.engine !== o.engineRequested,
+    engineReason: o.engineReason || null,   // 'not-installed' | 'launch-failed' | null
   })),
   devices: Object.entries(PROFILES).map(([k, v]) => ({ k, label: v.label, mobile: v.mobile !== false, engine: v.engine })),
   accounts: accountNames(state.url),
@@ -247,17 +248,32 @@ async function openSession(id, deviceKey, theme) {
   // Lazily, per engine: webkit is only launched once a profile asks for it.
   const wantEngine = profile.engine === 'webkit' ? 'webkit' : 'chromium';
   let engineUsed = wantEngine;
+  let engineReason = null;
   let browser;
-  try {
-    browser = await ensureBrowser(wantEngine);
-  } catch (e) {
-    if (wantEngine === 'chromium') throw e;
-    // Same fallback cli.mjs takes, and just as loud: a silent one would let a
-    // report say "clean on iPhone" about a screen iOS never rendered.
-    console.log(`  ! webkit would not launch (${String(e).split('\n')[0].slice(0, 60)}) -> falling back to chromium`);
-    console.log('    iOS-specific bugs WILL be missed in this session.');
+  // Two ways to end up without webkit, and they are not the same event. Never
+  // downloaded is the ordinary one: the panel only offers the engines it opens at
+  // startup, and a runtime set_device has nobody to ask. That is said once,
+  // quietly, with the fix -- and checked on disk first, so it does not cost a
+  // failed launch. Downloaded but refusing to launch is a real failure and stays
+  // loud. Either way the session says which engine it really is.
+  if (wantEngine !== 'chromium' && missingEngines([wantEngine], ENGINES).length) {
+    console.log(`  ${wantEngine} is not installed -> ${profile.label.split('—')[0].trim()} runs on chromium (npx playwright install ${wantEngine})`);
     engineUsed = 'chromium';
+    engineReason = 'not-installed';
     browser = await ensureBrowser('chromium');
+  } else {
+    try {
+      browser = await ensureBrowser(wantEngine);
+    } catch (e) {
+      if (wantEngine === 'chromium') throw e;
+      // Same fallback cli.mjs takes, and just as loud: a silent one would let a
+      // report say "clean on iPhone" about a screen iOS never rendered.
+      console.log(`  ! webkit would not launch (${String(e).split('\n')[0].slice(0, 60)}) -> falling back to chromium`);
+      console.log('    iOS-specific bugs WILL be missed in this session.');
+      engineUsed = 'chromium';
+      engineReason = 'launch-failed';
+      browser = await ensureBrowser('chromium');
+    }
   }
 
   // No locale is forced — see the same note in cli.mjs. --locale pins one.
@@ -266,7 +282,7 @@ async function openSession(id, deviceKey, theme) {
   await page.addInitScript(PERMISSION_HOOKS);   // sayfa kodundan ONCE
   const o = {
     id, deviceKey, profile, ctx, page, cdp: null, fallbackTimer: null,
-    engine: engineUsed, engineRequested: wantEngine,
+    engine: engineUsed, engineRequested: wantEngine, engineReason,
     viewport: settings.viewport, fullViewport: settings.viewport, keyboard: false,
     lastFrame: null, lastWrite: 0, streaming: false,
   };
@@ -443,8 +459,13 @@ function frameLoop(o) {
  */
 async function stopStream(o) {
   o.streaming = false;
+  // The frame loop reschedules itself, and clearTimeout only cancels a tick that
+  // has not started. One that is mid-screenshot would come back and schedule the
+  // next, so a paused webkit session kept capturing. Retiring its generation
+  // stops that tick too -- the same thing closeSession does.
+  o.streamGen = (o.streamGen || 0) + 1;
   if (o.cdp) { try { await o.cdp.send('Page.stopScreencast'); } catch {} }
-  if (o.fallbackTimer) { clearInterval(o.fallbackTimer); o.fallbackTimer = null; }
+  if (o.fallbackTimer) { clearTimeout(o.fallbackTimer); o.fallbackTimer = null; }
 }
 
 async function resumeStream(o) {
@@ -1397,7 +1418,12 @@ const PANEL_HTML_SABLON = `<!doctype html><html lang="en"><head><meta charset="u
         for (const c of deviceList) { const op = document.createElement('option'); op.value = c.k; op.textContent = c.label; sel.appendChild(op); }
       }
       sel.value = o.device;
-      pane.querySelector('header b').textContent = o.id + ' · ' + o.label.split('—')[0].trim();
+      // Name the engine where it is not the obvious one, and never let the header
+      // read as an iPhone engine while chromium renders.
+      const motor = o.engineFellBack
+        ? ' · chromium (' + (o.engineReason === 'not-installed' ? 'webkit not installed' : 'webkit would not launch') + ')'
+        : (o.engine === 'webkit' ? ' · webkit' : '');
+      pane.querySelector('header b').textContent = o.id + ' · ' + o.label.split('—')[0].trim() + motor;
     }
     highlight();
   }
@@ -1498,7 +1524,14 @@ server.listen(PORT, '127.0.0.1', () => {
 // The same first-run wall as the CLI. Only asked where there is a terminal to
 // answer in: the extension and MCP hosts start this with no stdin attached, and
 // a question nobody can see would look like a hang.
-await offerInstall(['chromium'], { chromium });
+//
+// And, as the CLI does for its devices, it offers the engines of the profiles
+// about to open -- not a constant. The default pair (desktop + pixel) never
+// asks for webkit; `--device iphone-15` in a terminal does. A profile switched
+// to later has nobody to ask, and openSession says so instead.
+const openingProfiles = [SINGLE ? null : arg('--desktop', 'desktop'), arg('--device', 'pixel')].filter(Boolean);
+const neededEngines = [...new Set(openingProfiles.map((k) => PROFILES[k]?.engine || 'chromium'))];
+await offerInstall(neededEngines, { chromium, webkit });
 
 // Browser sessions are separate: even if this throws, the server stays up and the panel shows the error.
 try {

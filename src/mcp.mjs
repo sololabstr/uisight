@@ -321,6 +321,9 @@ function tool(enName, trName, enDesc, trDesc, schema, handler) {
   server.registerTool(TR ? trName : enName, { description: TR ? trDesc : enDesc, inputSchema: schema }, handler);
 }
 
+/** Sessions already told their iPhone profile is a chromium stand-in (id:device). */
+const notedStandIns = new Set();
+
 tool('see_screen', 'ekrani_gor',
   'Screenshot of the live session (~260 tokens at the default scale). Prefer inspect for measurable problems.',
   'Canli oturumun ekran goruntusu (varsayilan olcekte ~260 token). Olculebilir sorunlar icin inspect.',
@@ -351,10 +354,26 @@ tool('see_screen', 'ekrani_gor',
     // a screen webkit never rendered -- either because the profile ran on
     // chromium, or because webkit would not launch and we fell back.
     const engine = r.headers.get('x-engine') || o?.engine || 'chromium';
-    const fellBack = o?.engineFellBack
-      ? ` · WARNING: ${o.engineRequested} was asked for, ${engine} is running — iOS-specific bugs WILL be missed`
-      : '';
-    return { content: [image(b64), text(`${o?.label || session || 'mobile'} · ${engine} · ${d?.theme} · ${d?.url}${cost}${note}${fellBack}`)] };
+    // Two ways to be on chromium instead, and they are not the same event.
+    // Never downloaded is the ordinary case -- the panel only offers the engines
+    // it opens at startup, and a runtime set_device has nobody to ask -- so it is
+    // said ONCE per session, with the fix. Tool text is re-sent on every later
+    // turn; a warning on every frame would be paid for many times over. The
+    // label below keeps saying it either way. Downloaded but refusing to launch
+    // is a real failure and stays loud on every frame.
+    let fellBack = '';
+    if (o?.engineFellBack && o.engineReason === 'not-installed') {
+      const key = `${o.id}:${o.device}`;
+      if (!notedStandIns.has(key)) {
+        notedStandIns.add(key);
+        fellBack = ` · note: ${o.engineRequested} is not installed, so this runs on ${engine} and iOS-specific bugs will be missed — install once: npx playwright install ${o.engineRequested}`;
+      }
+    } else if (o?.engineFellBack) {
+      fellBack = ` · WARNING: ${o.engineRequested} was asked for and would not launch, ${engine} is running — iOS-specific bugs WILL be missed`;
+    }
+    // Never let the label claim the iOS Safari engine while chromium renders.
+    const label = o?.engineFellBack ? `${o.label.split('—')[0].trim()} — ${engine} stand-in` : o?.label;
+    return { content: [image(b64), text(`${label || session || 'mobile'} · ${engine} · ${d?.theme} · ${d?.url}${cost}${note}${fellBack}`)] };
   });
 
 tool('inspect', 'denetle',
@@ -496,7 +515,10 @@ tool('status', 'durum',
     const d = await getStatus();
     const out = [`url: ${d.url}`, `theme: ${d.theme}${d.error ? `\nPAGE ERROR: ${d.error}` : ''}`];
     for (const o of d.sessions) {
-      const fellBack = o.engineFellBack ? ` — ${o.engineRequested} WAS ASKED FOR AND WOULD NOT LAUNCH` : '';
+      const fellBack = !o.engineFellBack ? ''
+        : o.engineReason === 'not-installed'
+          ? ` — ${o.engineRequested} not installed, chromium stand-in (npx playwright install ${o.engineRequested})`
+          : ` — ${o.engineRequested} WAS ASKED FOR AND WOULD NOT LAUNCH`;
       out.push(`session ${o.id}: ${o.label} (${o.viewport.width}x${o.viewport.height}) [${o.engine || 'chromium'}${fellBack}]`);
     }
     const recs = (d.records || []).slice(-20);
