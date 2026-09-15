@@ -173,7 +173,7 @@ export function missingBrowser(e, engine) {
   const hata = new Error(
     `${engine} is not installed yet.\n\n` +
     `  npx ${pinned} install ${engine}\n\n` +
-    `Playwright ships the driver over npm but downloads browsers separately (~150 MB, once).\n` +
+    `Playwright ships the driver over npm but downloads browsers separately (Chromium is about 700 MB on disk, once).\n` +
     `For real iOS Safari on iPhone profiles, add webkit: npx ${pinned} install chromium webkit`
   );
   // Someone whose only problem is "run one command" should not have to read a

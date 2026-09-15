@@ -9,6 +9,8 @@ package-lock.json
 extension/*.vsix
 .tools/
 extension/*.vsix
+# MCPB bundle and its staging folder (scripts/build-mcpb.mjs)
+dist/
 
 # Başka projelerin ajanları burada geçici betik üretiyor (uisight'ın motorunu
 # doğrudan çağırmak için). Kalıcı olanı docs/agent-notes/ altına alınır.

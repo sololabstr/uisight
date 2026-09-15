@@ -155,6 +155,7 @@ const state = {
   url: targetUrl,
   theme: arg('--theme', 'light'),
   error: null,
+  installing: null, // engine(s) being downloaded on a first run with no terminal
   records: [], // last 100 console/network records (ring buffer)
 };
 
@@ -210,6 +211,7 @@ const publicState = () => ({
   url: state.url,
   theme: state.theme,
   error: state.error,
+  installing: state.installing,
   sessions: [...sessions.values()].map((o) => ({
     id: o.id, device: o.deviceKey, label: o.profile.label, viewport: o.viewport,
     mobile: o.profile.mobile !== false, keyboard: !!o.keyboard,
@@ -1531,7 +1533,18 @@ server.listen(PORT, '127.0.0.1', () => {
 // to later has nobody to ask, and openSession says so instead.
 const openingProfiles = [SINGLE ? null : arg('--desktop', 'desktop'), arg('--device', 'pixel')].filter(Boolean);
 const neededEngines = [...new Set(openingProfiles.map((k) => PROFILES[k]?.engine || 'chromium'))];
-await offerInstall(neededEngines, { chromium, webkit });
+await offerInstall(neededEngines, { chromium, webkit }, {
+  // Without a terminal (an MCPB bundle in Claude Desktop) a download only runs if
+  // it was agreed to on the install screen, and there is nowhere to show its
+  // progress. The MCP client polling /state would read "no sessions yet" as a
+  // panel that failed to start, so say what is happening instead.
+  onStart: (eksik, boyut) => {
+    state.installing = `${eksik.join(' + ')} (${boyut})`;
+    console.log(`  downloading ${state.installing}, once -- sessions open when it finishes`);
+    broadcast('state', publicState());
+  },
+});
+state.installing = null;
 
 // Browser sessions are separate: even if this throws, the server stays up and the panel shows the error.
 try {

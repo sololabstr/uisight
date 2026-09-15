@@ -36,7 +36,7 @@ npx -y -p uisight uisight-audit                  # giriş yapıp her rolü gezer
 
 **İlk çalıştırma.** Playwright sürücüsünü npm ile getirir ama tarayıcıları ayrı
 indirir; yani ilk çalıştırmada sürülecek bir şey yoktur. Terminaldeyseniz uisight
-gerekeni indirmeyi teklif eder (~150 MB, bir kez) ve indirmeyi gösterir. Cevap
+gerekeni indirmeyi teklif eder (Chromium diskte ~700 MB, bir kez) ve indirmeyi gösterir. Cevap
 verecek kimse yoksa — CI, ya da editörün/ajan sunucusunun başlattığı bir panel —
 ne sorar ne indirir; komutu söyler. `UISIGHT_NO_INSTALL=1` teklifi tamamen kapatır:
 
@@ -45,6 +45,11 @@ npx playwright install chromium        # gerçek iOS Safari motoru için webkit 
 ```
 
 MCP kaydı (Claude Code): `claude mcp add --scope user uisight -- npx -y -p uisight@latest uisight-mcp`
+
+Claude Desktop'ta tek tıkla kurulum: [son sürümden](https://github.com/sololabstr/uisight/releases/latest)
+`uisight-<sürüm>.mcpb` dosyasını indirip açın. Claude Desktop kurar ve üç şey sorar:
+açılacak adres, araç seti (`all` ya da `core`), ilk kullanımda tarayıcıyı indirsin mi.
+JSON düzenlemek gerekmez.
 
 Türkçe araç adları için: `UISIGHT_LANG=tr` (`ekrani_gor`, `denetle`, `git`, `tikla`, `yaz`, `kaydir`, `cihaz_degistir`, `durum`, `isaretler`).
 

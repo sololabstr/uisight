@@ -116,10 +116,6 @@ async function action(body) {
 }
 
 // --- Engine lifecycle: ready = server responds AND at least one session is up ---
-const isReady = async (ms) => {
-  const d = await getStatus(ms);
-  return !!d?.sessions?.length;
-};
 let child = null;
 /**
  * Hedefi bu projenin hedefiyle uyusuyor mu diye sorar.
@@ -137,20 +133,44 @@ async function panelMatchesTarget() {
   } catch { return true; }                    // okuyamiyorsak engelleme
 }
 
+/**
+ * What the panel is doing instead of having sessions, when that is worth saying.
+ *
+ * A panel downloading its browser (an MCPB bundle's first run) is up but has no
+ * sessions, and the download takes a minute or two -- longer than the wait in
+ * ensureEngine. Without this, that wait timed out into "panel server did not
+ * start" about a panel that was busy doing exactly what it should. And a panel
+ * whose sessions failed with nothing retrying them (a browser nobody agreed to
+ * download) has its own error, which carries the fix; waiting 30 seconds to
+ * replace it with a vaguer one helped nobody.
+ */
+function notReadyBecause(d) {
+  if (d?.installing) {
+    return Object.assign(new Error(
+      `uisight is downloading ${d.installing}; this happens once. `
+      + 'It takes a minute or two -- call this tool again shortly.',
+    ), { report: true });
+  }
+  if (!d?.sessions?.length && d?.error) return Object.assign(new Error(d.error), { report: true });
+  return null;
+}
+
 async function ensureEngine() {
   try {
-    if (await isReady(1500)) {
+    const d = await getStatus(1500);
+    const neden = notReadyBecause(d);
+    if (neden) throw neden;
+    if (d?.sessions?.length) {
       if (!(await panelMatchesTarget())) {
-        const d = await getStatus().catch(() => null);
-        throw new Error(
+        throw Object.assign(new Error(
           `port ${PORT} is serving a different app (${d?.url}). Another project's panel is on this port. `
           + `Set UISIGHT_PORT to a free port for this project, or stop that panel.`,
-        );
+        ), { report: true });
       }
       return;
     }
   } catch (e) {
-    if (String(e.message || '').includes('different app')) throw e;
+    if (e.report) throw e;
   }
   // Restart the panel if it went away: a one-shot flag used to leave the tool permanently
   // dead after a crash. No shell:true — the argv array is passed through safely by Node
@@ -175,7 +195,14 @@ async function ensureEngine() {
   }
   for (let i = 0; i < 30; i++) {
     await new Promise((r) => setTimeout(r, 1000));
-    try { if (await isReady(1500)) return; } catch {}
+    try {
+      const d = await getStatus(1500);
+      const neden = notReadyBecause(d);
+      if (neden) throw neden;
+      if (d?.sessions?.length) return;
+    } catch (e) {
+      if (e.report) throw e;   // not up yet is expected here; a stated reason is not
+    }
   }
   throw new Error(`panel server did not start on port ${PORT} — try manually: node ${join(ROOT, 'server.mjs')} <url>`);
 }

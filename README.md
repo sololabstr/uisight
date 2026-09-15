@@ -69,7 +69,7 @@ npx -y -p uisight uisight-panel http://localhost:3000
 
 **First run.** Playwright ships its driver over npm but downloads browsers
 separately, so the first run has nothing to drive. In a terminal, uisight offers
-to fetch what it needs (~150 MB, once) and shows the download. Where there is
+to fetch what it needs (Chromium is about 700 MB on disk, once) and shows the download. Where there is
 nobody to answer — CI, or a panel an editor or agent host started — it never
 asks and never downloads; it names the exact command instead. `UISIGHT_NO_INSTALL=1`
 turns the offer off everywhere, and you can always do it yourself:
@@ -96,6 +96,18 @@ For Cursor / Antigravity / other MCP hosts, add to your MCP config:
 ```
 
 Then just tell your agent: *"look at my app with uisight"*. The panel server starts automatically when needed.
+
+### Claude Desktop (one click)
+
+Download `uisight-<version>.mcpb` from the [latest release](https://github.com/sololabstr/uisight/releases/latest)
+and open it. Claude Desktop installs it and asks three things: the page to open,
+the tool set (`all` or `core`), and whether to download the browser on first use.
+There is no JSON to edit.
+
+The bundle carries the server and its dependencies (about 7 MB). Browsers are not
+in it, which is what that third question is about: leave it on and a missing
+Chromium is fetched once, on the first tool call, by the Playwright version the
+bundle was built with. Build the bundle yourself with `node scripts/build-mcpb.mjs`.
 
 ## MCP tools
 

@@ -73,19 +73,24 @@ yol olarak sayılıyor.
 - **mcp.so** — gönderildi 5 Eyl: https://github.com/chatmcp/mcpso/issues/3955
   (şablon yok, serbest biçim; kabul görmüş bir gönderi örnek alındı). 14 Eyl
   itibarıyla hâlâ AÇIK, yorum yok.
-- **Smithery** — güncel belgelerde `smithery.yaml` HİÇ geçmiyor; üç yayın türü
-  var: hosted, external (URL) ve stdio için **MCPB paketi**. Depodaki dosya eski
-  `startCommand` biçiminde, çalışıp çalışmadığı doğrulanmadı — silinmedi ama
-  içine bu not yazıldı.
-- 🔑 **MCPB paketi — asıl fırsat, ayrı iş.** `.mcpb` artık resmi MCP paket biçimi
-  (modelcontextprotocol/mcpb). Yerel sunucuyu ZIP + manifest.json olarak
-  paketliyor ve Claude Desktop / Claude Code / MCP for Windows'ta **tek tıkla
-  kurulum** veriyor — yani her yeni kullanıcının JSON düzenleme adımı kalkıyor.
-  Smithery'nin stdio kaydı da bunu istiyor. Üretim bağımlılıkları ~31 MB
-  (playwright-core 14M + zod 5.9M + sdk 5.7M + playwright 5M), sıkıştırılmış
-  paket 12-15 MB civarı beklenir; tarayıcılar dahil değil, ilk çalıştırma
-  indirmesi yine geçerli. Tahmini yarım gün: manifest, `mcpb` CLI ile paketleme,
-  gerçek bir kurulum denemesi, sürümde üreten CI adımı.
+- **Smithery** — güncel belgelerde `smithery.yaml` HİÇ geçmiyor; üç yayın türü var: hosted,
+  external (URL) ve stdio için **MCPB paketi**. Paket artık var (alttaki madde) → sıradaki adım
+  Smithery'ye MCPB ile başvurmak, kullanıcı hesabıyla. Depodaki eski `startCommand` dosyası
+  silinmedi, içine not yazıldı.
+- ✅ **MCPB paketi ÜRETİLİYOR — 0.34.0, 16 Eyl.** `node scripts/build-mcpb.mjs` →
+  `dist/uisight-<sürüm>.mcpb`: **7,4 MB** paket, 27,7 MB açılmış (tahmin 12-15 MB'dı). Manifest
+  `mcpb/manifest.json`, kilidi `test/mcpb-manifest.test.mjs` (araç listesi + ayarlar + sürüm kodla
+  aynı kalmak zorunda). Kurulum ekranı üç şey soruyor: adres, araç seti, ilk kullanımda tarayıcı
+  indirilsin mi.
+  🔑 **Tek tık YALNIZ Claude Desktop** (macOS + Windows). Resmî belge Claude Code demiyor; buradaki
+  eski "Claude Code / MCP for Windows" iddiası doğrulanmamıştı, kaldırıldı.
+  Doğrulandı (16 Eyl): paket açılıp Claude Desktop'un yaptığı gibi `node src/mcp.mjs` ile koşturuldu
+  → 9 araç, `status` ve `inspect` gerçek ölçüm, MCP kanalına karışan çıktı yok; tarayıcısız ortamda
+  otomatik indirme 61 saniyede bitip oturumlar açıldı. `mcpb pack` 1.284 dosyayı eliyor (`.d.ts`,
+  `.map`, lint ayarları) — çalışma kodu değil.
+  🔴 Dağıtım: GitHub **Release varlığı** olarak yüklenecek; depoda henüz HİÇ release yok ve README
+  `releases/latest` bağlantısı veriyor. İmzasız (`mcpb sign` sertifika ister). Sürümle otomatik
+  üretim, org Actions ödemesi çözülünce.
 - `punkpeye/awesome-mcp-servers` (PR) — 15 Eyl'de listede YOK doğrulandı (ham README 1,6 MB;
   GitHub contents API 1 MB üstünü boş döndürür, oradan "yok" okunmaz). Hedef bölüm **Browser
   Automation**, `softvoyagers/pageshot-api` ile `SolveGate/solvegate-mcp` arası; satır biçimi

@@ -1,0 +1,75 @@
+{
+  "manifest_version": "0.3",
+  "name": "uisight",
+  "display_name": "uisight",
+  "version": "0.34.0",
+  "description": "Your AI can see the screen but cannot measure it. uisight opens your page as a phone and a desktop and returns measured UI findings as text.",
+  "long_description": "uisight runs your web app in a real browser as a phone and a desktop at the same time, and hands the model numbers instead of pixels: contrast against the actual background behind the text, touch targets under 44px, controls something else covers, text clipped by its own container, horizontal overflow, and console or network errors on that screen. It can also tap, type, scroll and switch devices, so a change can be made, measured and checked again without pasting screenshots.\n\nEverything runs on this computer. uisight drives a real Chromium; if it is not downloaded yet, it can fetch it once (about 700 MB on disk) the first time a tool runs, which takes a minute or two.",
+  "author": {
+    "name": "SoloLabs (Yusuf Cemre San)",
+    "url": "https://github.com/sololabstr"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sololabstr/uisight.git"
+  },
+  "homepage": "https://github.com/sololabstr/uisight#readme",
+  "documentation": "https://github.com/sololabstr/uisight#readme",
+  "support": "https://github.com/sololabstr/uisight/issues",
+  "icon": "icon.png",
+  "license": "MIT",
+  "keywords": ["ui", "mobile", "responsive", "accessibility", "contrast", "playwright", "qa"],
+  "server": {
+    "type": "node",
+    "entry_point": "src/mcp.mjs",
+    "mcp_config": {
+      "command": "node",
+      "args": ["${__dirname}/src/mcp.mjs"],
+      "env": {
+        "UISIGHT_URL": "${user_config.url}",
+        "UISIGHT_TOOLS": "${user_config.tools}",
+        "UISIGHT_AUTO_INSTALL": "${user_config.auto_install_browser}"
+      }
+    }
+  },
+  "tools": [
+    { "name": "see_screen", "description": "Screenshot of the live session (~260 tokens at the default scale). Prefer inspect for measurable problems." },
+    { "name": "inspect", "description": "Runs color/contrast/theme/button/overflow checks on the open page; returns MEASURED findings as text (cheaper and more precise than images). Without session, inspects ALL sessions." },
+    { "name": "goto", "description": "Navigates ALL sessions to the given URL (URL-synced). localhost included." },
+    { "name": "tap", "description": "Tap by CSS selector (preferred) or x/y CSS pixels." },
+    { "name": "type_text", "description": "Type into the focused field, or press one key." },
+    { "name": "scroll", "description": "Scrolls the page vertically. dy>0 down, dy<0 up (pixels)." },
+    { "name": "set_device", "description": "Changes a session's device profile and/or the color theme. iPhone and iPad profiles run on WebKit, the others on Chromium." },
+    { "name": "status", "description": "Returns the open URL, sessions (device+viewport) and recent console/network/mark records. FIRST tool to reach for when hunting a bug." },
+    { "name": "marks", "description": "Notes the user pinned in the panel, with the frame at that moment." }
+  ],
+  "user_config": {
+    "url": {
+      "type": "string",
+      "title": "Page to open",
+      "description": "The address the phone and desktop sessions open first. Your local dev server works, for example http://localhost:3000. The model can go elsewhere later with the goto tool.",
+      "default": "http://localhost:3000",
+      "required": false
+    },
+    "tools": {
+      "type": "string",
+      "title": "Tool set",
+      "description": "all: every tool (about 1,050 tokens of tool definitions on every request). core: goto, inspect, see_screen and status only, for less than half of that.",
+      "default": "all",
+      "required": false
+    },
+    "auto_install_browser": {
+      "type": "boolean",
+      "title": "Download the browser on first use",
+      "description": "uisight drives a real Chromium. If it is not on this computer yet, download it once (about 700 MB on disk) the first time a tool runs. Turn off to install it yourself with: npx playwright install chromium",
+      "default": true,
+      "required": false
+    }
+  },
+  "compatibility": {
+    "platforms": ["darwin", "win32", "linux"],
+    "runtimes": {
+      "node": ">=20.0.0"
+    }
+  }
+}
