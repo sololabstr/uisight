@@ -31,7 +31,9 @@ const body = (src, name) => {
 };
 
 test('startup offers the engines of the profiles it opens, not a constant', () => {
-  const call = server.match(/await offerInstall\(([^;]*)\);/);
+  // Only the first line: the call carries an options object whose body has its
+  // own semicolons, and the engines it offers are decided on that first line.
+  const call = server.match(/await offerInstall\(([^\n]*)/);
   assert.ok(call, 'the panel still offers a download at startup');
   assert.ok(!/\[\s*'chromium'\s*\]/.test(call[1]), 'a constant list never offers webkit to someone opening an iPhone');
   assert.match(server, /PROFILES\[[^\]]+\]\?\.engine/, 'the engines have to come from the profiles');

@@ -86,7 +86,7 @@ never pin a version by accident.
 
 Playwright ships its driver over npm but downloads browsers separately, so the
 first run has nothing to drive yet. Started from a terminal, uisight offers to
-fetch it (~150 MB, once) and shows the progress; started by the editor, where
+fetch it (Chromium is about 700 MB on disk, once) and shows the progress; started by the editor, where
 there is nobody to answer, it names the command instead:
 
 ```bash
