@@ -158,7 +158,16 @@ async function ensureEngine() {
   if (!child || child.exitCode !== null || child.killed) {
     const url = process.env.UISIGHT_URL || process.env.MOBILQA_URL || 'http://localhost:3000';
     log(`panel not running on ${PORT} — starting (${url})`);
-    child = spawn(process.execPath, [join(ROOT, 'server.mjs'), url, '--no-open'], {
+    // --port is not optional here. PORT is derived from the PROJECT's cwd by
+    // portForProject(), but server.mjs knows nothing about that function: with
+    // no --port and no UISIGHT_PORT in the environment it falls back to its own
+    // default, 5055. So the panel bound one port while this process polled
+    // another, and the wait below could only ever time out -- "panel server did
+    // not start" about a panel that had started perfectly well, on 5055.
+    //
+    // It leaked as well as failed: nothing can reach that panel afterwards, so
+    // it sits there holding a browser open until the machine is restarted.
+    child = spawn(process.execPath, [join(ROOT, 'server.mjs'), url, '--no-open', '--port', String(PORT)], {
       cwd: ROOT, windowsHide: true, detached: true, stdio: 'ignore',
     });
     child.on('error', (e) => log(`spawn failed: ${e.message}`));
