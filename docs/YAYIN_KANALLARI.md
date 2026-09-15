@@ -107,7 +107,7 @@ yol olarak sayılıyor.
 | Tarih | Katkıcı | PR | Durum |
 |---|---|---|---|
 | 15 Eyl 2026 | [@0fakaza](https://github.com/0fakaza) (commit adı `0xkyouma`) | #7 MCP paneli `--port` vermeden başlatıyordu: `UISIGHT_PORT` yoksa otomatik başlatma hiç çalışmıyordu · #4 panel başına iki tarayıcı · #5 izleyen yokken kare kodlama (boşta çekirdeğin %64'ü) · #8 gizli yazıya "12px altı" | ✅ Birleşti, **0.32.1** (16 Eyl; npm + MCP kaydı) |
-| 15 Eyl 2026 | aynı | #6 panelde iPhone profilleri WebKit ile | ⏸️ Bekliyor. Yorum: WebKit ilk çalıştırmada indirilmiyor (her `see_screen` uyarı taşır) + #5'in `stopStream`'i `streamGen`'i artırmıyor → rebase istendi |
+| 15 Eyl 2026 | aynı | #6 panelde iPhone profilleri WebKit ile | ✅ **#9 ile 0.33.0** (16 Eyl). İki commit'i yazar adıyla korunarak main'e taşındı; üstüne bizim commit: kurulum önerisi açılan profillerin motorlarından · "hiç indirilmemiş" oturumda bir kez not + komut, "kurulu ama açılmıyor" her karede WARNING · Chromium yedekte etiket "stand-in" · `stopStream` `streamGen`'i artırır · testi Windows'ta `pathToFileURL`. #6 kapatıldı, #9'a yönlendirildi |
 
 Dış PR'da izlenen yol (15 Eyl): kodu oku ve riskli kalıp tara (ağ, `child_process`, `package.json`, CI dosyaları) → her
 PR'ı ayrı koştur, yeni testi düzeltmesiz main kaynağına karşı da koştur (düşmeli) → yerel entegrasyon dalında sırayla
