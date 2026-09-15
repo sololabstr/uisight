@@ -821,6 +821,14 @@ export const INSPECTION_SCRIPT = (settings) => {
     // stops counting an icon glyph as unreadable text, which it never was.
     const metin = shortLabel(el);
     if (!metin) return;
+    // Text nobody can see is not unreadable text. The touch-target rule above
+    // already drops a zero-sized box; this one did not, so a `display:none`
+    // block reported its contents on every profile that hides it -- measured on
+    // a real login screen, whose theme switcher is desktop-only and was still
+    // reported as "11px" on the phone. A finding the user cannot act on, on a
+    // screen where the thing does not exist, spends the tool's credibility.
+    const r = el.getBoundingClientRect();
+    if (!r.width || !r.height) return;
     const fs = parseFloat(getComputedStyle(el).fontSize);
     if (fs && fs < 12) result.tinyText.push({ fontSize: `${fs}px`, text: metin.slice(0, 40) });
   });
