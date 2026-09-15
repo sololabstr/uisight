@@ -16,14 +16,16 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, join } from 'node:path';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const strip = (t) => t.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/[^\n]*/g, '$1');
 const server = strip(readFileSync(join(root, 'src', 'server.mjs'), 'utf8'));
 const mcp = strip(readFileSync(join(root, 'src', 'mcp.mjs'), 'utf8'));
-const { PROFILES } = await import(join(root, 'src', 'cli.mjs'));
+// A bare absolute path imports on Linux and macOS, but on Windows `C:\...` is
+// read as a URL with the scheme "c:" and the whole file fails to load.
+const { PROFILES } = await import(pathToFileURL(join(root, 'src', 'cli.mjs')).href);
 
 test('the table the panel reads still declares two engines', () => {
   // If this ever collapses to one, the rest of this file is dead weight.
