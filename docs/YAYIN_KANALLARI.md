@@ -102,6 +102,18 @@ yol olarak sayılıyor.
   Şablonun "talep eden hesapta 12 ay kamuya açık geçmiş" kutusu işaretlenmemişti (`yusufcemres` 25 Mart 2026
   açılışlı); gerekçe issue'da açıkça yazılmıştı ve engel olmadı.
 
+## Dış katkılar
+
+| Tarih | Katkıcı | PR | Durum |
+|---|---|---|---|
+| 15 Eyl 2026 | [@0fakaza](https://github.com/0fakaza) (commit adı `0xkyouma`) | #7 MCP paneli `--port` vermeden başlatıyordu: `UISIGHT_PORT` yoksa otomatik başlatma hiç çalışmıyordu · #4 panel başına iki tarayıcı · #5 izleyen yokken kare kodlama (boşta çekirdeğin %64'ü) · #8 gizli yazıya "12px altı" | ✅ Birleşti, **0.32.1** (16 Eyl; npm + MCP kaydı) |
+| 15 Eyl 2026 | aynı | #6 panelde iPhone profilleri WebKit ile | ⏸️ Bekliyor. Yorum: WebKit ilk çalıştırmada indirilmiyor (her `see_screen` uyarı taşır) + #5'in `stopStream`'i `streamGen`'i artırmıyor → rebase istendi |
+
+Dış PR'da izlenen yol (15 Eyl): kodu oku ve riskli kalıp tara (ağ, `child_process`, `package.json`, CI dosyaları) → her
+PR'ı ayrı koştur, yeni testi düzeltmesiz main kaynağına karşı da koştur (düşmeli) → yerel entegrasyon dalında sırayla
+birleştirip tam test → GitHub'da `--match-head-commit <TAM sha>` ile birleştir → sürüm commit'ini birleşmiş main'in
+ağacı yereldekiyle aynıysa ekle. Bu PR'larda CI hiç koşmadı (fork + org Actions ödeme sorunu); yeşil işaret beklenmez.
+
 ## Duyurular
 
 | Tarih | Kanal | Ne | Not |
@@ -129,7 +141,7 @@ Sıra (değişmedi): r/mcp → r/ClaudeAI → r/vscode → Show HN en son. Dış
 
 ## Sayılar
 
-14 Eylül 2026 — sürümler: npm + MCP kaydı **0.32.0**, Open VSX + VS Code Marketplace **1.7.2**.
+16 Eylül 2026 — sürümler: npm + MCP kaydı **0.32.1** (npm paketi `4b18cbec…`, git `034698b` ile içerik aynı; dosyalar CRLF, 0.32.0 da öyleydi), Open VSX + VS Code Marketplace **1.7.2** (eklenti motoru `npx uisight@latest` ile çektiği için motor düzeltmesinde eklenti sürümü gerekmez). Sayı tablosu 14 Eyl'in.
 
 | Kanal | 14 Eyl | 5 Eyl |
 |---|---|---|
