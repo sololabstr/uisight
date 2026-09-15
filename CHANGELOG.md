@@ -1,5 +1,39 @@
 # Changelog
 
+## 0.34.0 — 2026-09-16
+
+A one-click install for Claude Desktop, and a first run that says what it is doing.
+
+**MCPB bundle.** `node scripts/build-mcpb.mjs` builds `dist/uisight-<version>.mcpb`.
+The bundle holds the MCP server with its dependencies, installed fresh from the
+published version ranges, and a manifest. Claude Desktop reads the manifest to
+list the tools and to ask three settings: the page to open, the tool set (all or
+core), and whether to download the browser on first use. There is no JSON to
+edit. Browsers are not bundled: Chromium with its headless shell takes about 700
+MB on disk. A test keeps the manifest's tools, settings and version in step with
+the code.
+
+**The download size was wrong by four times.** Every message offering the browser
+said "~150 MB". Measured on Windows with Playwright 1.62, `playwright install
+chromium` fetches Chromium (428 MB) and its headless shell (272 MB), and WebKit
+takes 170 MB. That number is shown exactly where someone decides whether to agree
+to the download, so it now comes from one measured table (`diskSize`).
+
+**The browser download can be agreed to in advance.** A bundle has no terminal,
+so the panel could never ask, and a new user's first tool call ended in an error
+telling them to open one. With "Download the browser on first use" left on, a
+missing Chromium is fetched once, without a prompt, by the Playwright version
+the bundle carries. A bare `npx playwright install` would fetch the newest
+browser instead, which may not match. CI and `UISIGHT_NO_INSTALL` still win, and
+in a terminal it asks exactly as before.
+
+**A first run reports the download instead of timing out.** The panel's `/state`
+now says when it is downloading, and the MCP server passes that on: uisight is
+downloading chromium for the first time, call the tool again shortly. It used to
+wait 30 seconds and report that the panel did not start, about a panel that was
+busy doing exactly what it should. A panel whose sessions failed with nothing
+retrying them now returns its own error, which carries the fix, straight away.
+
 ## 0.33.0 — 2026-09-16
 
 The live panel's iPhone is now an iPhone engine, and not having that engine is no longer an alarm.
