@@ -90,7 +90,9 @@ yol olarak sayılıyor.
   GitHub contents API 1 MB üstünü boş döndürür, oradan "yok" okunmaz). Hedef bölüm **Browser
   Automation**, `softvoyagers/pageshot-api` ile `SolveGate/solvegate-mcp` arası; satır biçimi
   `- [owner/repo](github) [![glama rozeti](…/badges/score.svg)](glama) 📇 🏠 - açıklama`. Ajan
-  PR'ı başlık sonuna `🤖🤖🤖` ekleyince hızlı birleştiriliyor (CONTRIBUTING). Gönderim kullanıcı onayıyla.
+  PR'ı başlık sonuna `🤖🤖🤖` ekleyince hızlı birleştiriliyor (CONTRIBUTING). 🟡 **16 Eyl gönderildi:**
+  [#14476](https://github.com/punkpeye/awesome-mcp-servers/pull/14476) (fork `yusufcemres/awesome-mcp-servers`,
+  dal `add-uisight`; tek commit, README +1/-0). Fork eski çıktı (`e7e8756`) → önce `gh repo sync`, sonra ekleme.
 - ✅ **glama.ai/mcp** — ayrıca kayıt gerekmedi, GitHub'dan kendiliğinden dizinlenmiş:
   https://glama.ai/mcp/servers/sololabstr/uisight (15 Eyl: not B, rozet çalışıyor).
 
@@ -132,7 +134,7 @@ Reddit taslakları: `docs/duyurular/reddit/` (r-mcp, r-claudeai, r-vscode; görs
 
 1. r/mcp gönderisi onaylandı mı (bağlantıyı aç; "kaldırıldı" yazısı kalktı mı).
 2. Reddit hesabı: e-posta doğrulandı mı (Ayarlar → Hesap) · karma ve hesap yaşı (profil). Kısıt buysa r/ClaudeAI ve r/vscode'a **gönderme**; önce bir-iki hafta ilgili topluluklarda bağlantısız, gerçek yardım yorumu. Aynı gönderiyi yeniden atma, yeni hesap açma.
-3. Reddit'ten bağımsız vitrinler: glama.ai ✅ zaten dizinde. **punkpeye/awesome-mcp-servers** PR'ı hazır, kullanıcı onayı bekliyor: `docs/duyurular/awesome-mcp-servers.md` (u/punkpeye aynı zamanda r/mcp modu; PR'ı Reddit onayı için arka kapı olarak KULLANMA).
+3. Reddit'ten bağımsız vitrinler: glama.ai ✅ zaten dizinde. **punkpeye/awesome-mcp-servers** PR'ı [#14476](https://github.com/punkpeye/awesome-mcp-servers/pull/14476) 16 Eyl'de açıldı → birleşti mi bak (taslak `docs/duyurular/awesome-mcp-servers.md`) (u/punkpeye aynı zamanda r/mcp modu; PR'ı Reddit onayı için arka kapı olarak KULLANMA).
 4. Reddit hesabı (15 Eyl: karma 1, 1 haftalık): r/mcp, r/ClaudeAI, r/ClaudeCode, r/PWA gibi yerlerde bağlantısız, gerçek yardım yorumu. Karma birkaç düzineyi, hesap 2-4 haftayı bulunca r/ClaudeAI taslağıyla yeniden dene.
 
 Sıra (değişmedi): r/mcp → r/ClaudeAI → r/vscode → Show HN en son. Dış gönderim her biri için ayrı onayla.
