@@ -77,3 +77,17 @@ test('a closing session retires the frame already in flight', () => {
   assert.equal((loop.match(/!live\(\)/g) || []).length, 2,
     'checked before the screenshot and again after it -- the second is the one that matters');
 });
+
+test('scrolling still works on an engine that has no wheel', () => {
+  // Playwright refuses mouse.wheel in mobile WebKit outright. Reading the
+  // engine is what made the iPhone profiles actually run webkit, and that
+  // turned the refusal into a scroll that moved nothing -- a regression this
+  // change would otherwise have introduced.
+  const m = server.match(/case 'scroll': \{[\s\S]*?\n    \}/);
+  assert.ok(m, "the scroll action has to exist to be checked");
+  const body = m[0];
+  assert.match(body, /mouse\.wheel/, 'wheel stays first, where it exists it is the better tool');
+  assert.match(body, /window\.scrollBy/, 'and an engine that refuses it still has to scroll');
+  assert.match(body, /how = 'window'/, 'which mechanism ran has to reach the caller');
+  assert.match(mcp, /window scrolled/, 'and be said out loud -- the two are not equivalent');
+});
