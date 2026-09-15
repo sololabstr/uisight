@@ -1,5 +1,47 @@
 # Changelog
 
+## 0.33.0 — 2026-09-16
+
+The live panel's iPhone is now an iPhone engine, and not having that engine is no longer an alarm.
+
+**iPhone and iPad profiles run on WebKit in the panel (#6, [@0fakaza](https://github.com/0fakaza)).**
+Every profile already declared its engine and the CLI honoured it, but the
+panel read only the viewport and launched Chromium for everything. A live
+`iphone-15` session was a Chromium window at an iPhone's size, labelled "iOS
+Safari engine": nothing it showed was false, but it could not show an
+iOS-specific bug. The engine now travels all the way out, through `/state`, the
+`/frame` headers and the MCP captions. WebKit has no CDP screencast, so its
+frames come from a screenshot loop whose rate is measured, not fixed: capture
+stays under 15% of one core, between 30 frames a second and one. Scrolling
+falls back to `window.scrollBy` where there is no wheel. On this Windows machine
+WebKit's first launch took about 16 seconds.
+
+**Offered where it will be used.** The panel used to offer only Chromium on
+first run, so almost nobody would have had WebKit. Now, as the CLI does, it
+offers the engines of the profiles it is opening. The default desktop + Pixel
+pair never asks for WebKit; `--device iphone-15` in a terminal does. The
+extension and MCP hosts are still never asked, because there is no terminal to
+answer in.
+
+**Two ways to be on Chromium instead, two tones.** Whether WebKit is on disk is
+checked before launching it. Never downloaded is the ordinary case: the session
+runs on Chromium, its label says "chromium stand-in", `status` gives the install
+command, and `see_screen` says it once per session instead of on every frame.
+Tool text is re-sent on every later turn, so a per-frame warning was paid for
+many times over. Downloaded but refusing to launch is a real failure, and keeps
+its WARNING on every frame. In neither case does anything claim the iOS Safari
+engine while Chromium renders.
+
+**A paused stream stops the frame loop too.** #5 stopped encoding when nobody
+is watching by clearing the frame timer, but the new loop reschedules itself
+and `clearTimeout` only cancels a tick that has not started. One caught
+mid-screenshot came back and kept a paused WebKit session capturing. Pausing
+now retires the loop's generation, as closing a session already did.
+
+The engine test imported `cli.mjs` by a bare absolute path, which loads on Linux
+and macOS but fails the whole file on Windows (`C:\` is read as a URL scheme).
+It goes through `pathToFileURL` now.
+
 ## 0.32.1 — 2026-09-15
 
 Four fixes from an outside contributor, [@0fakaza](https://github.com/0fakaza). Each was found by running the tool, and each comes with a test that fails without it.
