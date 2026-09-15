@@ -1,5 +1,39 @@
 # Changelog
 
+## 0.32.1 — 2026-09-15
+
+Four fixes from an outside contributor, [@0fakaza](https://github.com/0fakaza). Each was found by running the tool, and each comes with a test that fails without it.
+
+**The MCP server could not start its own panel (#7).** The MCP derives a port
+from the project's folder and polls it, but it launched the panel without
+`--port`. So the panel bound its default 5055 while the MCP waited on another
+port for thirty seconds and then reported that the panel "did not start".
+Unless `UISIGHT_PORT` happened to be set, auto-start never worked, and the
+orphaned panel kept a browser open that nothing could reach. The spawn now
+passes the port it polls.
+
+**One browser per panel, not two (#4).** The two sessions open concurrently,
+and `if (!browser) browser = await chromium.launch()` let both pass the check
+before either assignment landed. The second browser was then overwritten in the
+variable, so not even the exit handler could close it: two headless Chrome
+process trees where one was meant. The launch is now cached as a promise, and a
+failed launch is not kept.
+
+**No encoding while nobody is watching (#5).** The screencast was started once
+and never stopped, so every repaint was encoded to a JPEG and thrown away for
+the life of the panel. Two idle panels on a continuously repainting page
+measured 64% of a core; with the change, 11%. With a viewer attached the frame
+rate is unchanged. The stream now stops when the last viewer leaves and restarts
+on the first, and `marks` gets the same 250ms age check `/frame` already had, so
+a paused stream cannot hand back a screen that is no longer there.
+
+**Hidden text is not tiny text (#8).** The under-12px rule reported the
+contents of `display:none` blocks, so a desktop-only control came back as an
+`11px` finding on the phone, where it does not exist. It now skips zero-sized
+boxes, as the touch-target rule already did.
+
+173 tests.
+
 ## 0.32.0 — 2026-09-14
 
 The sizes Android now forces, what is really painted under text, one scale for both screens, and panels and reports that stop losing things.

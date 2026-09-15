@@ -6,12 +6,12 @@
     "url": "https://github.com/sololabstr/uisight",
     "source": "github"
   },
-  "version": "0.32.0",
+  "version": "0.32.1",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "uisight",
-      "version": "0.32.0",
+      "version": "0.32.1",
       "transport": {
         "type": "stdio"
       },
@@ -25,7 +25,7 @@
         },
         {
           "name": "UISIGHT_PORT",
-          "description": "Panel server port (default: 5055)",
+          "description": "Panel server port (default: derived from the project's working directory, so parallel projects get separate panels)",
           "isRequired": false,
           "format": "number",
           "isSecret": false
