@@ -160,7 +160,36 @@ const state = {
 
 /** id -> session. Fixed ids: 'web' (desktop class), 'mobile' (phone class). */
 const sessions = new Map();
-let browser = null;
+/**
+ * One browser for every session -- and it has to stay one.
+ *
+ * `if (!browser) browser = await chromium.launch()` reads as a guard but is not
+ * one. The two sessions are opened concurrently (the `Promise.all` at the
+ * bottom of this file, which is deliberate: opening them in sequence made the
+ * total the SUM of both and could blow past the MCP client's readiness budget),
+ * so both reach the test before either assignment lands, both pass it, and TWO
+ * browsers launch. The second is then overwritten in the variable, so nothing
+ * can close it -- not even the exit handler, which only sees the one the
+ * variable still holds. Measured on a plain `uisight-panel <url>`: two
+ * `chrome-headless-shell` process trees where one was meant.
+ *
+ * Caching the PROMISE removes the window: the second caller finds the first
+ * launch still in flight and waits on that same one.
+ */
+let browserLaunch = null;
+
+function ensureBrowser() {
+  // Nothing is awaited between the test and the assignment -- that gap was the bug.
+  if (!browserLaunch) {
+    browserLaunch = chromium.launch().catch((e) => {
+      // A failed launch must not stay cached, or one transient failure would
+      // leave this panel unable to open a browser for the rest of its life.
+      browserLaunch = null;
+      throw missingBrowser(e, 'chromium');
+    });
+  }
+  return browserLaunch;
+}
 const clients = new Set(); // SSE
 
 // --- Helpers ---
@@ -203,10 +232,7 @@ async function openSession(id, deviceKey, theme) {
 
   const profile = PROFILES[deviceKey] || PROFILES[id === 'web' ? 'desktop' : 'pixel'];
   const settings = deviceSettings(profile.pw);
-  if (!browser) {
-    try { browser = await chromium.launch(); }
-    catch (e) { throw missingBrowser(e, 'chromium'); }
-  }
+  const browser = await ensureBrowser();
 
   // No locale is forced — see the same note in cli.mjs. --locale pins one.
   const ctx = await browser.newContext({ ...settings, colorScheme: theme, ...(LOCALE ? { locale: LOCALE } : {}) });
@@ -1357,5 +1383,5 @@ process.on('uncaughtException', (e) => console.error('  ! uncaught exception:', 
 server.on('clientError', (e, soket) => { try { soket.destroy(); } catch {} });
 
 for (const sig of ['SIGINT', 'SIGTERM']) {
-  process.on(sig, async () => { try { await browser?.close(); } catch {} process.exit(0); });
+  process.on(sig, async () => { try { await (await browserLaunch)?.close(); } catch {} process.exit(0); });
 }
