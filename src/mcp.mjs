@@ -346,7 +346,15 @@ tool('see_screen', 'ekrani_gor',
     const cost = dim ? ` · ~${Math.round((dim.w * dim.h) / 750)} tokens (${dim.w}x${dim.h})` : '';
     const cut = r.headers.get('x-clipped');
     const note = cut ? ` · showing the top ${cut}px — scroll and capture again for the rest` : '';
-    return { content: [image(b64), text(`${o?.label || session || 'mobile'} · ${d?.theme} · ${d?.url}${cost}${note}`)] };
+    // Name the engine. Without it a model can look at an `iphone-15` session,
+    // see the label say "iOS Safari engine", and report "clean on iPhone" about
+    // a screen webkit never rendered -- either because the profile ran on
+    // chromium, or because webkit would not launch and we fell back.
+    const engine = r.headers.get('x-engine') || o?.engine || 'chromium';
+    const fellBack = o?.engineFellBack
+      ? ` · WARNING: ${o.engineRequested} was asked for, ${engine} is running — iOS-specific bugs WILL be missed`
+      : '';
+    return { content: [image(b64), text(`${o?.label || session || 'mobile'} · ${engine} · ${d?.theme} · ${d?.url}${cost}${note}${fellBack}`)] };
   });
 
 tool('inspect', 'denetle',
@@ -464,7 +472,7 @@ tool('scroll', 'kaydir',
   });
 
 tool('set_device', 'cihaz_degistir',
-  "Changes a session's device profile and/or the color theme. Profiles: iphone-15, iphone-se, pixel, galaxy, ipad, desktop, laptop. theme: light|dark (without session, theme applies to ALL sessions).",
+  "Changes a session's device profile and/or the color theme. Each profile runs on the engine it declares: iphone-15/iphone-se/ipad -> WebKit (the real iOS Safari engine), pixel/galaxy/desktop/laptop -> Chromium. Changing engine rebuilds the session. theme: light|dark (without session, theme applies to ALL sessions).",
   'Oturumun cihaz profilini ve/veya temayi degistirir.',
   { session: SESSION,
     device: z.string().optional().describe('iphone-15|iphone-se|pixel|galaxy|ipad|desktop|laptop'),
@@ -484,7 +492,10 @@ tool('status', 'durum',
     await ensureEngine();
     const d = await getStatus();
     const out = [`url: ${d.url}`, `theme: ${d.theme}${d.error ? `\nPAGE ERROR: ${d.error}` : ''}`];
-    for (const o of d.sessions) out.push(`session ${o.id}: ${o.label} (${o.viewport.width}x${o.viewport.height})`);
+    for (const o of d.sessions) {
+      const fellBack = o.engineFellBack ? ` — ${o.engineRequested} WAS ASKED FOR AND WOULD NOT LAUNCH` : '';
+      out.push(`session ${o.id}: ${o.label} (${o.viewport.width}x${o.viewport.height}) [${o.engine || 'chromium'}${fellBack}]`);
+    }
     const recs = (d.records || []).slice(-20);
     if (recs.length) {
       out.push('\nrecent records (console/network/marks):');
