@@ -468,7 +468,10 @@ tool('scroll', 'kaydir',
   async ({ session, dy }) => {
     await ensureEngine();
     const r = await action({ type: 'scroll', session: session ? sid(session) : undefined, dy });
-    return { content: [text(r.ok ? `scrolled ${dy}px (${r.session})` : `error: ${r.message}`)], ...(r.ok ? {} : { isError: true }) };
+    // `how` says which mechanism moved the page: mobile WebKit has no wheel, so
+    // there the window is scrolled and a nested scroller under the pointer is NOT.
+    const nasil = r.how === 'window' ? ' — window scrolled (no wheel on this engine; a scroller inside the page did not move)' : '';
+    return { content: [text(r.ok ? `scrolled ${dy}px (${r.session})${nasil}` : `error: ${r.message}`)], ...(r.ok ? {} : { isError: true }) };
   });
 
 tool('set_device', 'cihaz_degistir',

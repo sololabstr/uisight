@@ -513,9 +513,24 @@ async function applyAction(g) {
     }
     case 'scroll': {
       const o = targetSession(g);
-      await o.page.mouse.move(o.viewport.width / 2, o.viewport.height / 2);
-      await o.page.mouse.wheel(0, g.dy);
-      return { ok: true, session: o.id };
+      // Playwright refuses mouse.wheel outright in mobile WebKit ("Mouse wheel
+      // is not supported"), so on an iPhone or iPad profile this threw and the
+      // page did not move at all. Wheel is still the better tool where it
+      // exists -- it scrolls whatever sits under the pointer, nested scrollers
+      // included -- so it stays first and the window is the fallback.
+      //
+      // The two are not equivalent, and the difference is reported rather than
+      // smoothed over: a caller that scrolled a list inside the page needs to
+      // know when it scrolled the page instead.
+      let how = 'wheel';
+      try {
+        await o.page.mouse.move(o.viewport.width / 2, o.viewport.height / 2);
+        await o.page.mouse.wheel(0, g.dy);
+      } catch {
+        await o.page.evaluate((dy) => window.scrollBy(0, dy), g.dy);
+        how = 'window';
+      }
+      return { ok: true, session: o.id, how };
     }
     case 'press': {
       const o = targetSession(g);
