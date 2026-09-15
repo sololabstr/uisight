@@ -6,12 +6,12 @@
     "url": "https://github.com/sololabstr/uisight",
     "source": "github"
   },
-  "version": "0.33.0",
+  "version": "0.34.0",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "uisight",
-      "version": "0.33.0",
+      "version": "0.34.0",
       "transport": {
         "type": "stdio"
       },
