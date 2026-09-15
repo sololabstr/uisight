@@ -241,7 +241,7 @@ async function openSession(id, deviceKey, theme) {
   const o = {
     id, deviceKey, profile, ctx, page, cdp: null, fallbackTimer: null,
     viewport: settings.viewport, fullViewport: settings.viewport, keyboard: false,
-    lastFrame: null, lastWrite: 0,
+    lastFrame: null, lastWrite: 0, streaming: false,
   };
   // Register in the map only AFTER the first goto completes: when the setup goto races
   // an incoming `goto` action on the same page, Chromium can commit the late navigation
@@ -279,6 +279,9 @@ async function openSession(id, deviceKey, theme) {
 
   sessions.set(id, o); // the page has settled — actions may reach it now
   await startStream(o);
+  // With no viewer, pause right after the first frame: `lastFrame` stays
+  // populated for /frame to age-check, but nothing keeps encoding.
+  if (clients.size === 0) await stopStream(o);
   broadcast('state', publicState());
   return o;
 }
@@ -332,6 +335,7 @@ async function startStream(o) {
           format: 'jpeg', quality: 70,
           maxWidth: o.viewport.width, maxHeight: o.viewport.height, everyNthFrame: 1,
         }), 5000);
+        o.streaming = true;
         console.log(`  stream[${o.id}]: CDP screencast (live)`);
         // First-frame guarantee: screencast only emits on repaint — a fully static
         // page would leave the pane blank until something moves.
@@ -347,11 +351,59 @@ async function startStream(o) {
   }
 
   console.log(`  stream[${o.id}]: FALLBACK mode — one frame per second${FORCE_FALLBACK ? ' (UISIGHT_FALLBACK=1)' : ''}`);
+  o.streaming = true;
   o.fallbackTimer = setInterval(async () => {
     if (!o.page) return;
     try { handleFrame(o, (await o.page.screenshot({ type: 'jpeg', quality: 70, scale: 'css' })).toString('base64')); } catch {}
   }, 1000);
 }
+
+/**
+ * Stop encoding frames nobody is looking at.
+ *
+ * `Page.startScreencast` is called once per session and never stopped --
+ * `stopScreencast` does not appear anywhere in this file. So every repaint is
+ * encoded to a JPEG and thrown away for as long as the panel lives, whether or
+ * not a browser tab is open on it. The server already knows who is watching:
+ * `clients` is the SSE set, and it was only ever used to broadcast to.
+ *
+ * On a page that repaints continuously this was ~59% of a core per panel, idle,
+ * with no viewer. A static page costs nothing either way, because the screencast
+ * only fires on repaint -- which is why this went unnoticed.
+ *
+ * Nothing changes while somebody IS watching: same `everyNthFrame`, same
+ * quality, same frame rate. The stream only stops when the last viewer leaves,
+ * and starts again on the first one.
+ */
+async function stopStream(o) {
+  o.streaming = false;
+  if (o.cdp) { try { await o.cdp.send('Page.stopScreencast'); } catch {} }
+  if (o.fallbackTimer) { clearInterval(o.fallbackTimer); o.fallbackTimer = null; }
+}
+
+async function resumeStream(o) {
+  if (o.streaming) return;
+  if (o.cdp) {
+    try {
+      await o.cdp.send('Page.startScreencast', {
+        format: 'jpeg', quality: 70,
+        maxWidth: o.viewport.width, maxHeight: o.viewport.height, everyNthFrame: 1,
+      });
+      o.streaming = true;
+      // Same first-frame guarantee as startStream: a screencast only emits on
+      // repaint, so a settled page would leave the pane blank until it moved.
+      try { handleFrame(o, (await o.page.screenshot({ type: 'jpeg', quality: 70, scale: 'css' })).toString('base64')); } catch {}
+      return;
+    } catch {
+      try { o.cdp.removeAllListeners(); await o.cdp.detach(); } catch {}
+      o.cdp = null;
+    }
+  }
+  await startStream(o);   // no CDP, or restarting it failed -- take the long way
+}
+
+const pauseAllStreams = () => Promise.all([...sessions.values()].map((o) => stopStream(o))).catch(() => {});
+const resumeAllStreams = () => Promise.all([...sessions.values()].map((o) => resumeStream(o))).catch(() => {});
 
 function handleFrame(o, b64) {
   o.lastFrame = b64;
@@ -777,7 +829,8 @@ async function applyAction(g) {
       try {
         const buf = area
           ? await o.page.screenshot({ type: 'jpeg', quality: 90, scale: 'css', clip: area })
-          : (o.lastFrame ? Buffer.from(o.lastFrame, 'base64')
+          : ((o.lastFrame && Date.now() - (o.lastFrameAt || 0) < 250)
+                         ? Buffer.from(o.lastFrame, 'base64')
                          : await o.page.screenshot({ type: 'jpeg', quality: 85, scale: 'css' }));
         writeFileSync(join(MARKS_DIR, imageName), buf);
       } catch {}
@@ -863,9 +916,14 @@ const handleRequest = async (req, res) => {
     res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' });
     res.write('retry: 2000\n\n');
     clients.add(res);
-    res.on('error', () => clients.delete(res));
-    req.on('error', () => clients.delete(res));
-    req.on('close', () => clients.delete(res));
+    if (clients.size === 1) resumeAllStreams();   // first viewer -- start encoding again
+    const dropClient = () => {
+      clients.delete(res);
+      if (clients.size === 0) pauseAllStreams();  // last viewer left -- stop
+    };
+    res.on('error', dropClient);
+    req.on('error', dropClient);
+    req.on('close', dropClient);
     res.write(`event: state\ndata: ${JSON.stringify(publicState())}\n\n`);
     for (const o of sessions.values()) {
       if (o.lastFrame) res.write(`event: frame\ndata: ${JSON.stringify({ session: o.id, img: o.lastFrame })}\n\n`);
