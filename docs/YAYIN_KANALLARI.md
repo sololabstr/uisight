@@ -141,7 +141,7 @@ Sıra (değişmedi): r/mcp → r/ClaudeAI → r/vscode → Show HN en son. Dış
 
 ## Sayılar
 
-16 Eylül 2026 — sürümler: npm + MCP kaydı **0.32.1** (npm paketi `4b18cbec…`, git `034698b` ile içerik aynı; dosyalar CRLF, 0.32.0 da öyleydi), Open VSX + VS Code Marketplace **1.7.2** (eklenti motoru `npx uisight@latest` ile çektiği için motor düzeltmesinde eklenti sürümü gerekmez). Sayı tablosu 14 Eyl'in.
+16 Eylül 2026 — sürümler: npm + MCP kaydı **0.33.0** (npm paketi `b9c0b481…`, 13 dosya git `7ff228c` ile içerik aynı; dosyalar CRLF, önceki sürümler de öyle), Open VSX + VS Code Marketplace **1.7.2** (eklenti motoru `npx uisight@latest` ile çektiği için motor düzeltmesinde eklenti sürümü gerekmez). Sayı tablosu 14 Eyl'in.
 
 | Kanal | 14 Eyl | 5 Eyl |
 |---|---|---|
