@@ -88,9 +88,10 @@ yol olarak sayılıyor.
   → 9 araç, `status` ve `inspect` gerçek ölçüm, MCP kanalına karışan çıktı yok; tarayıcısız ortamda
   otomatik indirme 61 saniyede bitip oturumlar açıldı. `mcpb pack` 1.284 dosyayı eliyor (`.d.ts`,
   `.map`, lint ayarları) — çalışma kodu değil.
-  🔴 Dağıtım: GitHub **Release varlığı** olarak yüklenecek; depoda henüz HİÇ release yok ve README
-  `releases/latest` bağlantısı veriyor. İmzasız (`mcpb sign` sertifika ister). Sürümle otomatik
-  üretim, org Actions ödemesi çözülünce.
+  ✅ Dağıtım: **GitHub release v0.34.0** — deponun İLK release'i, varlık `uisight-0.34.0.mcpb`
+  (7.805.191 bayt, indirme HTTP 200 doğrulandı): https://github.com/sololabstr/uisight/releases/tag/v0.34.0
+  README'ler `releases/latest` bağlantısı veriyor, artık boşa çıkmıyor. İmzasız (`mcpb sign` sertifika
+  ister). Sürümle otomatik üretim, org Actions ödemesi çözülünce.
 - `punkpeye/awesome-mcp-servers` (PR) — 15 Eyl'de listede YOK doğrulandı (ham README 1,6 MB;
   GitHub contents API 1 MB üstünü boş döndürür, oradan "yok" okunmaz). Hedef bölüm **Browser
   Automation**, `softvoyagers/pageshot-api` ile `SolveGate/solvegate-mcp` arası; satır biçimi
