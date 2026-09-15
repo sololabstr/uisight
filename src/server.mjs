@@ -18,7 +18,7 @@
  */
 
 import { createServer } from 'node:http';
-import { chromium } from 'playwright';
+import { chromium, webkit } from 'playwright';
 import { mkdirSync, writeFileSync, readdirSync, readFileSync, renameSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -176,19 +176,20 @@ const sessions = new Map();
  * Caching the PROMISE removes the window: the second caller finds the first
  * launch still in flight and waits on that same one.
  */
-let browserLaunch = null;
+const ENGINES = { chromium, webkit };
+const launches = {};                 // engine name -> Promise<Browser>
 
-function ensureBrowser() {
+function ensureBrowser(name) {
   // Nothing is awaited between the test and the assignment -- that gap was the bug.
-  if (!browserLaunch) {
-    browserLaunch = chromium.launch().catch((e) => {
+  if (!launches[name]) {
+    launches[name] = ENGINES[name].launch().catch((e) => {
       // A failed launch must not stay cached, or one transient failure would
       // leave this panel unable to open a browser for the rest of its life.
-      browserLaunch = null;
-      throw missingBrowser(e, 'chromium');
+      delete launches[name];
+      throw missingBrowser(e, name);
     });
   }
-  return browserLaunch;
+  return launches[name];
 }
 const clients = new Set(); // SSE
 
@@ -212,8 +213,10 @@ const publicState = () => ({
   sessions: [...sessions.values()].map((o) => ({
     id: o.id, device: o.deviceKey, label: o.profile.label, viewport: o.viewport,
     mobile: o.profile.mobile !== false, keyboard: !!o.keyboard,
+    engine: o.engine, engineRequested: o.engineRequested,
+    engineFellBack: o.engine !== o.engineRequested,
   })),
-  devices: Object.entries(PROFILES).map(([k, v]) => ({ k, label: v.label, mobile: v.mobile !== false })),
+  devices: Object.entries(PROFILES).map(([k, v]) => ({ k, label: v.label, mobile: v.mobile !== false, engine: v.engine })),
   accounts: accountNames(state.url),
   records: state.records.slice(-30),
 });
@@ -221,7 +224,11 @@ const publicState = () => ({
 // --- Session lifecycle ---
 async function closeSession(o) {
   if (!o) return;
-  if (o.fallbackTimer) { clearInterval(o.fallbackTimer); o.fallbackTimer = null; }
+  // clearTimeout only cancels a frame that has not started. Bumping the
+  // generation also retires one that is mid-screenshot, so it cannot
+  // reschedule itself onto a page that is about to close.
+  o.streamGen = (o.streamGen || 0) + 1;
+  if (o.fallbackTimer) { clearTimeout(o.fallbackTimer); o.fallbackTimer = null; }
   if (o.cdp) { try { o.cdp.removeAllListeners(); await o.cdp.detach(); } catch {} o.cdp = null; }
   if (o.ctx) { try { await o.ctx.close(); } catch {} o.ctx = null; }
 }
@@ -232,7 +239,26 @@ async function openSession(id, deviceKey, theme) {
 
   const profile = PROFILES[deviceKey] || PROFILES[id === 'web' ? 'desktop' : 'pixel'];
   const settings = deviceSettings(profile.pw);
-  const browser = await ensureBrowser();
+  // PROFILES carries an `engine` for every profile and cli.mjs honours it; the
+  // panel did not read it at all, so `iphone-15` here was a Chromium window at
+  // an iPhone's size. It never showed anything false -- it just could not show
+  // an iOS-specific bug, while the label said "iOS Safari engine".
+  //
+  // Lazily, per engine: webkit is only launched once a profile asks for it.
+  const wantEngine = profile.engine === 'webkit' ? 'webkit' : 'chromium';
+  let engineUsed = wantEngine;
+  let browser;
+  try {
+    browser = await ensureBrowser(wantEngine);
+  } catch (e) {
+    if (wantEngine === 'chromium') throw e;
+    // Same fallback cli.mjs takes, and just as loud: a silent one would let a
+    // report say "clean on iPhone" about a screen iOS never rendered.
+    console.log(`  ! webkit would not launch (${String(e).split('\n')[0].slice(0, 60)}) -> falling back to chromium`);
+    console.log('    iOS-specific bugs WILL be missed in this session.');
+    engineUsed = 'chromium';
+    browser = await ensureBrowser('chromium');
+  }
 
   // No locale is forced — see the same note in cli.mjs. --locale pins one.
   const ctx = await browser.newContext({ ...settings, colorScheme: theme, ...(LOCALE ? { locale: LOCALE } : {}) });
@@ -240,6 +266,7 @@ async function openSession(id, deviceKey, theme) {
   await page.addInitScript(PERMISSION_HOOKS);   // sayfa kodundan ONCE
   const o = {
     id, deviceKey, profile, ctx, page, cdp: null, fallbackTimer: null,
+    engine: engineUsed, engineRequested: wantEngine,
     viewport: settings.viewport, fullViewport: settings.viewport, keyboard: false,
     lastFrame: null, lastWrite: 0, streaming: false,
   };
@@ -317,13 +344,17 @@ async function applyKeyboard(o, open, force = false) {
 /** Frame stream: CDP screencast first (3 attempts), falling back to a screenshot per second.
  *  Screencast is not critical on its own — if it dies the panel still works. */
 async function startStream(o) {
-  if (o.fallbackTimer) { clearInterval(o.fallbackTimer); o.fallbackTimer = null; }
+  if (o.fallbackTimer) { clearTimeout(o.fallbackTimer); o.fallbackTimer = null; }
 
   // CDP setup can silently hang on a second context — cap every attempt at 5s
   // and fall through to the screenshot-interval fallback (seen 2026-08-19).
   const withTimeout = (p, ms) => Promise.race([p, new Promise((_, r) => setTimeout(() => r(new Error(`timeout ${ms}ms`)), ms))]);
 
-  if (!FORCE_FALLBACK) {
+  // CDP is a Chromium protocol: `newCDPSession` throws on webkit. Trying anyway
+  // burns three attempts and 2.4s of sleeps, and prints three alarming lines
+  // about a screencast that was never possible. The engine is known here.
+  const hasCdp = (o.engine || 'chromium') === 'chromium';
+  if (!FORCE_FALLBACK && hasCdp) {
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
         o.cdp = await withTimeout(o.ctx.newCDPSession(o.page), 5000);
@@ -350,12 +381,47 @@ async function startStream(o) {
     }
   }
 
-  console.log(`  stream[${o.id}]: FALLBACK mode — one frame per second${FORCE_FALLBACK ? ' (UISIGHT_FALLBACK=1)' : ''}`);
+  const why = FORCE_FALLBACK ? 'UISIGHT_FALLBACK=1' : (hasCdp ? 'screencast would not start' : `no CDP on ${o.engine}`);
+  console.log(`  stream[${o.id}]: frame loop (${why})`);
   o.streaming = true;
-  o.fallbackTimer = setInterval(async () => {
-    if (!o.page) return;
+  frameLoop(o);
+}
+
+/**
+ * The frame loop behind every engine that has no screencast.
+ *
+ * It used to be `setInterval(..., 1000)`, which had two problems. One fixed
+ * rate cannot be right for both engines: the same screenshot of the same page
+ * takes 3ms on webkit and 33ms on chromium, so a second is far too slow for one
+ * and the wrong shape for the other. And `setInterval` with an `async` body
+ * stacks: if a frame outlasts the interval, the next is queued anyway and the
+ * work compounds. `setTimeout` recursion makes that impossible -- the next
+ * frame is only scheduled once the previous one is done.
+ *
+ * So the rate is measured rather than assumed: whatever the frame cost, wait
+ * long enough that capture stays under a fixed share of one core. An expensive
+ * page slows itself down; a cheap one speeds up; neither can exceed the budget.
+ */
+const DUTY = 0.15;        // at most this share of one core, for capture
+const MIN_GAP = 33;       // 30fps is already past what a panel can show
+const MAX_GAP = 1000;     // the old fixed rate, now the slow end
+
+function frameLoop(o) {
+  const gen = o.streamGen = (o.streamGen || 0) + 1;
+  const live = () => o.page && o.streamGen === gen;
+  const tick = async () => {
+    if (!live()) return;
+    const started = Date.now();
     try { handleFrame(o, (await o.page.screenshot({ type: 'jpeg', quality: 70, scale: 'css' })).toString('base64')); } catch {}
-  }, 1000);
+    const took = Date.now() - started;
+    // Smoothed, so one slow frame does not hold the rate down afterwards.
+    o.shotMs = o.shotMs == null ? took : o.shotMs * 0.7 + took * 0.3;
+    // Checked again after the await: the session may have closed while this
+    // frame was being taken, and a retired tick must not schedule the next.
+    if (!live()) return;
+    o.fallbackTimer = setTimeout(tick, Math.min(MAX_GAP, Math.max(MIN_GAP, Math.round(o.shotMs / DUTY))));
+  };
+  o.fallbackTimer = setTimeout(tick, 0);
 }
 
 /**
@@ -1008,7 +1074,7 @@ const handleRequest = async (req, res) => {
         }
       }
 
-      const head = { 'content-type': 'image/jpeg', 'x-session': o.id, 'x-scale': String(scale) };
+      const head = { 'content-type': 'image/jpeg', 'x-session': o.id, 'x-scale': String(scale), 'x-engine': o.engine || 'chromium' };
       if (clipped) head['x-clipped'] = clipped;
       if (frameAge != null) head['x-frame-age'] = String(Math.round(frameAge));
       res.writeHead(200, head);
@@ -1441,5 +1507,8 @@ process.on('uncaughtException', (e) => console.error('  ! uncaught exception:', 
 server.on('clientError', (e, soket) => { try { soket.destroy(); } catch {} });
 
 for (const sig of ['SIGINT', 'SIGTERM']) {
-  process.on(sig, async () => { try { await (await browserLaunch)?.close(); } catch {} process.exit(0); });
+  process.on(sig, async () => {
+    for (const launch of Object.values(launches)) { try { await (await launch)?.close(); } catch {} }
+    process.exit(0);
+  });
 }
